@@ -1,0 +1,113 @@
+# LabPilot workflow reference
+
+Run files live in `<lab>/.labpilot/runs/<run-id>/`. You write three JSON files, and LabPilot validates each one.
+
+## plan.json
+
+```json
+{
+  "schema_version": 1,
+  "lab_title": "Lab 3: Data Cleaning with Pandas",
+  "source_sha256": "<copy from init/inspect output>",
+  "profile": "python",
+  "requires_native_colab_evidence": false,
+  "required_files": [
+    {"name": "sales.csv", "role": "dataset", "required": true,
+     "expected_columns": ["order_id", "amount"], "used_by_tasks": ["T1.A", "T1.B"]}
+  ],
+  "tasks": [
+    {"id": "SETUP", "title": "Environment setup", "placement": "append", "depends_on": [],
+     "instructions": ["Import libraries and load the data"], "observation_questions": [],
+     "required_evidence": ["code", "output"]},
+    {"id": "T1.A", "title": "Load the data", "parent": "T1",
+     "source_anchor": "b12#3fa2c1d09e8b", "solution_anchor": "b31/r1/c0#e3b0c44298fc",
+     "placement": "anchor", "depends_on": ["SETUP"],
+     "instructions": ["Show the schema and row count"],
+     "observation_questions": [{"id": "T1.A.Q1", "text": "How many rows are there?", "kind": "observed"}],
+     "required_evidence": ["code", "output"]}
+  ],
+  "notes": ["Heading mentions retail_sales.csv but the code only uses sales.csv; not treated as required."]
+}
+```
+
+- `profile`: always `python` (Colab labs install anything else in their own `!pip` setup cell).
+- `placement`:
+  - `anchor`: insert inside `solution_anchor`, which is usually a solution-box cell from `document.json` `solution_boxes[].fill_anchor`.
+  - `after_source`: insert after the task when the manual has no solution box.
+  - `append`: add to an appendix.
+- Anchors must be copied exactly, including the `#fingerprint`. If the manual changes, its fingerprint no longer matches and LabPilot rejects the anchor rather than writing to the wrong place.
+- Question ids and task ids must be unique. `depends_on` may only point to earlier tasks.
+- Every inspected task part must appear in the plan. If a part really doesn't apply, pass `--allow-uncovered` and explain why in `notes`.
+
+## cells.json
+
+```json
+{
+  "schema_version": 1,
+  "cells": [
+    {"id": "setup-imports", "task_id": "SETUP", "setup": true,
+     "source": "import pandas as pd\nprint(pd.__version__)"},
+    {"id": "t1a-load", "task_id": "T1.A",
+     "source": "df = pd.read_csv('sales.csv')\nprint(df.dtypes)\nprint('rows:', len(df))"}
+  ],
+  "approved_security_rules": []
+}
+```
+
+Rules for cell code:
+- Files are staged in the kernel's working directory. Use relative names (`'sales.csv'`), never `/content/...` or absolute paths. Write outputs (for example Parquet) to relative paths too.
+- Do not use `files.upload()`, `input()`, Drive mounts, or credential or environment dumps. These are denied.
+- Shell (`!pip ...`, `subprocess`) and network use trigger warnings (allowed; recorded in the report).
+- Make every required result visible with `print`, `display`, `df.show()`, `plt.show()` or `explain()`. A cell that is expected to show output but prints nothing counts as missing evidence. Set `"expect_output": false` only for cells that truly display nothing.
+- Prove numeric claims with `assert` (use a tolerance for floats). Example: `assert abs(matched + unmatched - total) < 1e-6`.
+- Keep the manual's `!pip install` / `!apt-get` lines in the first setup cell; they run inside Colab. Print library versions there.
+- Keep the starter code from the manual. Fill in only what is missing. Write at the course's level.
+- Cells execute in order in one kernel. Every `execute` starts a fresh kernel and replays from the first cell, so do not rely on state from an earlier attempt.
+
+## Repair loop
+
+`labpilot execute <id> --json` returns `status` as `OK`, `FAILED_CELLS` or `PARTIAL` (some cells are blocked by missing inputs).
+
+For each item in `failed[]`, read `error_code`, `error_type`, `error_message` and `traceback_tail`, then fix that cell:
+
+| error_code | What to do |
+|---|---|
+| CODE_SYNTAX / CODE_RUNTIME | Fix the code. |
+| MISSING_PACKAGE | Use a library the profile has, or tell the user. |
+| MISSING_DATA | Check the file name. Never fabricate the file. |
+| TIMEOUT | Simplify the code or pass `--timeout`. |
+| RUNTIME_DISCONNECTED | Run `labpilot resume`. |
+
+Rebuild with `build-notebook`. Changed cells become `pending`, and every later cell becomes `stale`. Each change to a failed cell uses one repair. When the budget (default 3) runs out, stop and report to the user.
+
+## colab-mcp (host-mediated)
+
+1. `labpilot execute <id> --backend colab-mcp --json` returns `WAITING_FOR_HOST` and writes `host_actions.json`.
+2. Make sure the colab-mcp tools are listed in your session. If they are not, report `MCP_UNAVAILABLE` and offer the local backend.
+3. Upload the files and check their sha256. Then run the cells in order and collect each cell's real nbformat outputs.
+4. Write `result.json` (`HostExecutionRecord` in `host_actions.json` `result_schema`) and run `labpilot record-execution <id> --file result.json`.
+
+## answers.json
+
+```json
+{
+  "schema_version": 1,
+  "answers": [
+    {"question_id": "T1.A.Q1", "text": "The file has 1,204 rows (printed by cell t1a-load).",
+     "source_cell_ids": ["t1a-load"], "verification": "verified"}
+  ],
+  "task_summaries": [
+    {"task_id": "T1.A", "explanation": "Reads the CSV with pandas and prints its column types and row count."}
+  ]
+}
+```
+
+- `verified`: every cited cell passed in the current attempt.
+- `conceptual`: only for questions of `kind: conceptual`.
+- `not_verified`: the data or runtime was unavailable. The text should say what is missing.
+
+## Resume and inputs
+
+- `labpilot status <id> --json` shows the state, failures, blockers and `next_action`.
+- `labpilot resume <id>` rechecks input hashes, re-stages new or changed datasets, replays cells, captures and exports. It stops when it needs you (`actor: agent`) or the user.
+- If the manual itself changed, start a new run.
