@@ -3,8 +3,9 @@
 * Installs the CLI into a LabPilot-owned virtual environment (never globally), pinned to the
   version this adapter was verified against.
 * Upstream lists Linux and macOS only. On Windows LabPilot calls the CLI's Python entry point
-  directly (no .exe launcher); this native-Windows mode is EXPERIMENTAL until verified with a
-  real signed-in run, and is reported as such.
+  directly (no .exe launcher). Verified 2026-11-25 on Windows 11 with google-colab-cli 0.8.0 and a
+  signed Python 3.12: sign-in, CPU runtime allocation, upload + hash check, per-cell execution with
+  rich outputs, and session release. Other Windows setups are untested.
 * Sign-in is the CLI's own Google OAuth flow, run interactively in the user's terminal.
   LabPilot never reads, stores or forwards credentials.
 """
@@ -78,10 +79,10 @@ def install_colab_cli() -> dict[str, Any]:
     cfg = load_config()
     cfg["colab_cli"]["command"] = command
     cfg["colab_cli"]["owned_install"] = str(root)
-    cfg["colab_cli"]["native_windows_experimental"] = sys.platform == "win32"
+    cfg["colab_cli"]["native_windows"] = sys.platform == "win32"
     save_config(cfg)
     return {"installed": True, "version": ver.stdout.strip()[-120:], "command": command, "steps": steps,
-            "experimental": sys.platform == "win32",
+            "native_windows": sys.platform == "win32",
             "next": "Run `labpilot colab-login` once in a terminal to sign in with Google."}
 
 

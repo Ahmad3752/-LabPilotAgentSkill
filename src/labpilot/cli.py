@@ -181,9 +181,9 @@ def setup(
                  "Then ask: Use LabPilot to work through the lab in this folder ..."]
         if backend in ("colab-cli", "auto") and not cfg["colab_cli"].get("command") and not wsl_distro:
             notes.append("Google Colab CLI not configured yet: rerun with --install-colab-cli, then `labpilot colab-login`.")
-        if colab and colab.get("experimental"):
-            notes.append("Upstream google-colab-cli lists Linux/macOS only; LabPilot's native-Windows mode is "
-                         "experimental until a signed-in run succeeds on this machine.")
+        if colab and colab.get("native_windows"):
+            notes.append("Upstream google-colab-cli lists Linux/macOS only; LabPilot runs it natively on Windows "
+                         "(verified on Windows 11 with CLI 0.8.0). If it misbehaves, report it and use WSL.")
         if colab:
             notes.append(colab["next"])
         if backend == "colab-mcp" and not register_mcp:
