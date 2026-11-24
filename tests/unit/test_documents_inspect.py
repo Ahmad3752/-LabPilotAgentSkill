@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import docx
+import pytest
+from docx.shared import Pt
+
+from labpilot.documents.anchors import element_text, fingerprint, resolve
+from labpilot.documents.inspect import colab_features, inspect_docx
+from labpilot.errors import LabPilotError
+from labpilot.workspace import sha256_file
+
+
+def _nested_doc(path: Path) -> Path:
+    d = docx.Document()
+    d.add_paragraph("Intro paragraph")
+    t = d.add_table(rows=2, cols=2)
+    t.rows[0].cells[0].text = "outer r0c0"
+    inner = t.rows[1].cells[1].add_table(rows=1, cols=1)
+    inner.rows[0].cells[0].text = "deep text"
+    d.add_paragraph("After table")
+    r = d.add_paragraph().add_run("x = 1")
+    r.font.name = "Consolas"
+    r.font.size = Pt(9)
+    d.save(str(path))
+    return path
+
+
+def test_reading_order_nested_tables_and_anchor_resolution(tmp_path: Path) -> None:
+    p = _nested_doc(tmp_path / "n.docx")
+    insp = inspect_docx(p, sha256_file(p))
+    texts = [(b.anchor, b.text) for b in insp.blocks if b.text]
+    order = [t for _, t in texts]
+    assert order.index("Intro paragraph") < order.index("outer r0c0") < order.index("deep text") < order.index("After table")
+    deep = next(b for b in insp.blocks if b.text == "deep text" and b.kind == "paragraph")
+    assert deep.anchor == "b1/r1/c1/b1/r0/c0/b0"  # nested table inside cell r1c1 (cell keeps an empty first paragraph)
+    body = docx.Document(str(p)).element.body
+    el = resolve(body, f"{deep.anchor}#{fingerprint('deep text')}")
+    assert element_text(el) == "deep text"
+    with pytest.raises(LabPilotError):
+        resolve(body, f"{deep.anchor}#000000000000")
+    with pytest.raises(LabPilotError):
+        resolve(body, "b99")
+    assert any("x = 1" in c["code"] for c in insp.code_blocks)
+
+
+def test_sample_python_lab_structure(python_lab: Path) -> None:
+    p = python_lab / "Lab 3.docx"
+    insp = inspect_docx(p, sha256_file(p), tmp_path_images := python_lab / "imgs")
+    assert insp.title_candidates[0] == "Lab 3: Data Analysis with Pandas"
+    assert [t["id"] for t in insp.tasks] == ["T1", "T2"]
+    assert [p_["id"] for t in insp.tasks for p_ in t["parts"]] == ["T1.A", "T1.B", "T2.A", "T2.B"]
+    assert len(insp.questions) == 6
+    assert [b["task_hint"] for b in insp.solution_boxes] == ["T1", "T2"]
+    assert all("Paste your code" in b["placeholder"] for b in insp.solution_boxes)
+    assert {f["name"] for f in insp.file_references} == {"sales.csv", "regions.csv"}
+    assert [s["label"] for s in insp.student_fields] == ["Name", "CMS ID"]
+    assert len(insp.images) == 1 and (tmp_path_images / "image_01.png").exists()
+    assert insp.environment.get("colab") == ["yes"]
+
+
+def test_colab_specific_starter_code_is_flagged(python_lab: Path, tmp_path: Path) -> None:
+    p = python_lab / "Lab 3.docx"
+    features = {f["feature"]: f for f in colab_features(inspect_docx(p, sha256_file(p)))}
+    assert set(features) == {"interactive-upload", "content-paths", "setup-commands"}
+    assert "stages the files" in features["interactive-upload"]["advice"]
+
+    d = docx.Document()
+    r = d.add_paragraph().add_run("from google.colab import drive\ndrive.mount('/content/drive')")
+    r.font.name = "Consolas"
+    q = tmp_path / "drive.docx"
+    d.save(str(q))
+    assert "drive-mount" in {f["feature"] for f in colab_features(inspect_docx(q, sha256_file(q)))}
