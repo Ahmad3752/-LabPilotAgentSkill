@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pytest-tmp/
+
+# LabPilot run workspaces and generated artifacts (may contain private lab material)
+.labpilot/
+output/
+**/output/
+
+# Private lab materials and datasets: never commit university manuals or course data
+*.docx
+!examples/**/*.docx
+*.doc
+*.csv
+*.parquet
+*.xlsx
+private/
+
+# Secrets, tokens, browser state
+.env
+*.env
+.env.*
+!.env.example
+*token*.json
+credentials*.json
+*.pem
+*.key
+.auth/
+playwright/.auth/
+browser-profile/
+.colab-cli-oauth-config.json
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+~$*.docx
+
+# Local agent installs created by `labpilot setup --scope project`
+.agents/skills/labpilot/
+.claude/skills/labpilot/
+.claude/settings.local.json
