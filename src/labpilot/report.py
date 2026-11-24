@@ -70,9 +70,9 @@ def completion_checks(run: Run, plan: Plan) -> dict[str, dict[str, Any]]:
     capture_problems = read_json(em).get("capture_problems", []) if em.exists() else []
     need = []
     for t in plan.tasks:
-        if "output" in t.required_evidence or "code" in t.required_evidence:
-            if not any(e.task_id == t.id and e.valid for e in evidence):
-                need.append(t.id)
+        needs_evidence = "output" in t.required_evidence or "code" in t.required_evidence
+        if needs_evidence and not any(e.task_id == t.id and e.valid for e in evidence):
+            need.append(t.id)
     checks["evidence_valid"] = {"ok": not ev_problems and not capture_problems and not need,
                                 "detail": {"problems": ev_problems, "capture_problems": capture_problems,
                                            "tasks_without_evidence": need}}

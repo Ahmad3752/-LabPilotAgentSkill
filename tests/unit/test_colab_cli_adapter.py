@@ -12,7 +12,7 @@ from typing import Any
 
 import nbformat
 import pytest
-from nbformat.v4 import new_code_cell, new_notebook, new_output
+from nbformat.v4 import new_output
 
 from labpilot.adapters import colab_cli
 from labpilot.adapters.base import CellRequest, RunContext, RuntimeHandle

@@ -52,9 +52,7 @@ def element_text(el: Any) -> str:
             parts.append(node.text)
         elif node.tag == W_TAB:
             parts.append("\t")
-        elif node.tag == W_BR:
-            parts.append("\n")
-        elif node.tag == W_P and parts and not parts[-1].endswith("\n"):
+        elif node.tag == W_BR or node.tag == W_P and parts and not parts[-1].endswith("\n"):
             parts.append("\n")
     return "".join(parts).strip()
 

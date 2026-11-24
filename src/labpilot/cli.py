@@ -442,11 +442,11 @@ def runs(lab_dir: Path = LAB_DIR_OPT, json_out: bool = JSON_OPT) -> None:
 
 def main() -> None:
     if sys.platform == "win32":
+        import contextlib
+
         for stream in (sys.stdout, sys.stderr):
-            try:
-                stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-            except (AttributeError, ValueError):
-                pass
+            with contextlib.suppress(AttributeError, ValueError):
+                stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     app()
 
 

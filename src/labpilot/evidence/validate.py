@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from PIL import Image, ImageStat
 
@@ -22,7 +23,7 @@ def image_problems(path: Path) -> tuple[list[str], int, int]:
         with Image.open(path) as im:
             w, h = im.size
             gray = im.convert("L")
-            lo, hi = gray.getextrema()
+            lo, hi = cast(tuple[int, int], gray.getextrema())
             stddev = ImageStat.Stat(gray).stddev[0]
     except Exception as exc:  # noqa: BLE001
         return [f"image does not decode: {exc}"], 0, 0

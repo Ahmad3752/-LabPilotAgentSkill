@@ -116,7 +116,8 @@ def bound_outputs(outputs: list[Any], limit: int) -> bool:
 
 
 def summarize(outputs: list[Any]) -> dict[str, Any]:
-    stdout, stderr = [], []
+    stdout: list[str] = []
+    stderr: list[str] = []
     err: dict[str, Any] | None = None
     for out in outputs:
         ot = out.get("output_type")
@@ -149,9 +150,10 @@ def run(req: dict[str, Any]) -> int:
             cell.outputs = []
             cell.execution_count = None
 
+    cell_timeout = int(req.get("timeout", 600))
     client = NotebookClient(
         nb,
-        timeout=int(req.get("timeout", 600)),
+        timeout=cell_timeout,
         kernel_name=req.get("kernel_name", "python3"),
         allow_errors=True,
         interrupt_on_timeout=True,
@@ -183,7 +185,8 @@ def run(req: dict[str, Any]) -> int:
         try:
             from jupyter_core.utils import run_sync
 
-            run_sync(client.kc.execute_interactive)(PROBE, output_hook=hook, timeout=60, store_history=False)
+            assert client.kc is not None
+            run_sync(client.kc.execute_interactive)(PROBE, output_hook=hook, timeout=60, store_history=False)  # type: ignore[attr-defined]
         except Exception as exc:  # noqa: BLE001 - identity is best-effort metadata
             emit("probe_failed", message=str(exc)[:300])
         for line in "".join(probe_out).splitlines():
@@ -226,9 +229,9 @@ def run(req: dict[str, Any]) -> int:
                 status = "failed"
                 err_type, err_msg, tb = s["error"]["ename"], s["error"]["evalue"], s["error"]["traceback"]
                 # nbclient interrupts the kernel on timeout; the cell then reports KeyboardInterrupt
-                if err_type == "KeyboardInterrupt" and time.monotonic() - t0 >= client.timeout - 1:
+                if err_type == "KeyboardInterrupt" and time.monotonic() - t0 >= cell_timeout - 1:
                     err_type = "CellTimeoutError"
-                    err_msg = f"Cell exceeded the {client.timeout}s limit and was interrupted."
+                    err_msg = f"Cell exceeded the {cell_timeout}s limit and was interrupted."
             rec = {
                 **base,
                 "status": status,

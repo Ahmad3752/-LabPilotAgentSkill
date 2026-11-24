@@ -82,7 +82,10 @@ def rmtree_owned(path: Path) -> None:
         func(p)
 
     if path.exists():
-        shutil.rmtree(path, onexc=onexc) if sys.version_info >= (3, 12) else shutil.rmtree(path, onerror=onexc)
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=onexc)  # type: ignore[call-arg]
+        else:
+            shutil.rmtree(path, onerror=onexc)
 
 
 def new_run_id() -> str:

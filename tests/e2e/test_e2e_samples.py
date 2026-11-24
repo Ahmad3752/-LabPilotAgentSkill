@@ -11,8 +11,8 @@ from pathlib import Path
 
 import docx
 import pytest
-from conftest import ROOT
 
+from conftest import ROOT
 from labpilot.workspace import sha256_file
 
 pytestmark = pytest.mark.e2e

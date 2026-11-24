@@ -96,6 +96,10 @@ class Question(Strict):
         return v
 
 
+def _both_evidence() -> list[Literal["code", "output"]]:
+    return ["code", "output"]
+
+
 class Task(Strict):
     id: str
     title: str
@@ -106,7 +110,7 @@ class Task(Strict):
     depends_on: list[str] = Field(default_factory=list)
     instructions: list[str] = Field(default_factory=list)
     observation_questions: list[Question] = Field(default_factory=list)
-    required_evidence: list[Literal["code", "output"]] = Field(default_factory=lambda: ["code", "output"])
+    required_evidence: list[Literal["code", "output"]] = Field(default_factory=lambda: _both_evidence())
     cell_ids: list[str] = Field(default_factory=list)
 
     @field_validator("id")

@@ -76,6 +76,7 @@ ignore = [
   "S603",  # subprocess with argument lists is the intended design
   "S607",  # executables are resolved from PATH deliberately (colab, wsl, powershell)
   "S404",
+  "E501",  # long lines are allowed; readability is reviewed by humans
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -85,5 +86,5 @@ ignore = [
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
-warn_unused_ignores = true
+warn_unused_ignores = false  # some ignores are platform-specific
 check_untyped_defs = true

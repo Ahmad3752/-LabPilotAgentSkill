@@ -12,8 +12,9 @@ from typing import Any
 import docx
 import nbformat
 import pytest
-from conftest import cli, load_example
 from PIL import Image
+
+from conftest import cli, load_example
 
 pytestmark = pytest.mark.integration
 

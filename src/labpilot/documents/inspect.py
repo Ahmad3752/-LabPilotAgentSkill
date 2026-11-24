@@ -341,12 +341,12 @@ def _analyse(insp: Inspection) -> None:
             continue
         text = b.text
         is_headingish = b.heading_level is not None or b.bold or len(text) < 90
-        m = TASK_RE.match(text)
-        if m and is_headingish:
+        tm = TASK_RE.match(text)
+        if tm and is_headingish:
             if re.search(r"\b(solution|answer)s?\b", text, re.I):
                 continue
-            number = m.group(2)
-            title = m.group(3).strip() or text.strip()
+            number = tm.group(2)
+            title = tm.group(3).strip() or text.strip()
             task = {
                 "id": f"T{number}",
                 "number": int(number),
@@ -359,14 +359,17 @@ def _analyse(insp: Inspection) -> None:
             insp.tasks.append(task)
             continue
         pm = PART_RE.match(text)
-        qm = QUESTION_PART_RE.match(text) if b.heading_level is not None else None  # "Question 2: ..." headings
-        if (pm and is_headingish or qm) and task is not None:
-            label = pm.group(1).upper() if pm else qm.group(1)  # type: ignore[union-attr]
-            rest = (pm or qm).group(2).strip()  # type: ignore[union-attr]
+        qm: re.Match[str] | None = (
+            QUESTION_PART_RE.match(text) if b.heading_level is not None else None  # "Question 2: ..." headings
+        )
+        unit_match = pm if (pm and is_headingish) else qm
+        if unit_match is not None and task is not None:
+            label = unit_match.group(1).upper()
+            rest = unit_match.group(2).strip()
             task["parts"].append(
                 {
                     "id": f"{task['id']}.{label}",
-                    "title": rest or (f"Part {label}" if pm else f"Question {label}"),
+                    "title": rest or (f"Question {label}" if unit_match is qm else f"Part {label}"),
                     "source_anchor": f"{b.anchor}#{b.fp}",
                     "questions": [],
                     "instructions": [],

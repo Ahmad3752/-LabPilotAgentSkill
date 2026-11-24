@@ -12,7 +12,6 @@ from typing import Any
 
 from labpilot import __version__
 from labpilot.adapters.colab_cli import AUTH_HINTS, ColabCliBackend
-
 from labpilot.agents import skill_status, skill_targets
 from labpilot.config import load_config
 from labpilot.documents.validate import find_renderer, find_word
@@ -121,7 +120,7 @@ def doctor(project_dir: Path | None = None) -> dict[str, Any]:
     for agent in ("codex", "claude"):
         for scope in ("project", "user"):
             skills[f"{agent}:{scope}"] = skill_status(skill_targets(agent, scope, project_dir)[0])
-    report = {
+    report: dict[str, Any] = {
         "labpilot": __version__,
         "os": {"system": platform.system(), "release": platform.release(), "machine": platform.machine()},
         "python": {"version": platform.python_version(), "ok": sys.version_info >= (3, 11)},

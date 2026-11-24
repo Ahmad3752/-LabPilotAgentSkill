@@ -25,7 +25,7 @@ import shutil
 import sys
 import uuid
 from pathlib import Path, PureWindowsPath
-from typing import Any
+from typing import Any, Literal
 
 import nbformat
 from nbformat.v4 import new_code_cell, new_notebook
@@ -239,7 +239,7 @@ class ColabCliBackend:
         results: list[CellExecution] = []
         failed = False
         for c in cells:
-            base = dict(run_id=ctx.run.id, attempt_id=ctx.attempt_id, cell_id=c.cell_id, task_id=c.task_id,
+            base: dict[str, Any] = dict(run_id=ctx.run.id, attempt_id=ctx.attempt_id, cell_id=c.cell_id, task_id=c.task_id,
                         code_sha256=c.code_sha256, backend=self.name, runtime=handle.identity)
             if failed:
                 results.append(CellExecution(**base, status="blocked", error_code="UPSTREAM_FAILED",
@@ -258,7 +258,7 @@ class ColabCliBackend:
             outputs = cell["outputs"]
             truncated = bound_outputs(outputs, 200_000)
             s = summarize(outputs)
-            status = "failed" if s["error"] else "passed"
+            status: Literal["passed", "failed"] = "failed" if s["error"] else "passed"
             results.append(CellExecution(
                 **base, status=status, execution_count=cell.get("execution_count"), started_at=started, ended_at=utcnow(),
                 stdout=s["stdout"][-20000:], stderr=s["stderr"][-20000:], outputs=outputs, output_truncated=truncated,

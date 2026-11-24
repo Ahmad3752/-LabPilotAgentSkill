@@ -87,10 +87,7 @@ def build_notebook(
             md = new_markdown_cell("\n".join(lines))
             md.id = "md-" + "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in t.id)[:60]
             nb.cells.append(md)
-        if c.kind == "markdown":
-            cell = new_markdown_cell(c.source)
-        else:
-            cell = new_code_cell(c.source)
+        cell = new_markdown_cell(c.source) if c.kind == "markdown" else new_code_cell(c.source)
         cell.id = c.id
         cell.metadata["labpilot"] = {
             "task_id": c.task_id,

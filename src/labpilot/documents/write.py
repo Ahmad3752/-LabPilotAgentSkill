@@ -266,13 +266,13 @@ def write_document(
 
     student_targets: list[tuple[Any, str, str]] = []
     if student and student_fields:
-        for f in student_fields:
-            key = _student_key(f["label"])
-            if key and key in student and not f.get("has_value"):
+        for sf in student_fields:
+            skey = _student_key(sf["label"])
+            if skey and skey in student and not sf.get("has_value"):
                 try:
-                    student_targets.append((resolve(body, f["anchor"]), f["label"], student[key]))
+                    student_targets.append((resolve(body, sf["anchor"]), sf["label"], student[skey]))
                 except LabPilotError:
-                    report.warnings.append(f"student field '{f['label']}' moved; not filled")
+                    report.warnings.append(f"student field '{sf['label']}' moved; not filled")
 
     fill_targets: list[tuple[Any, TableCellFill]] = []
     for f in table_fills or []:
@@ -316,12 +316,15 @@ def write_document(
             report.placements.append({"task_id": content.task.id, "anchor": None, "mode": "append"})
 
     for el, label, value in student_targets:
-        p = Paragraph(el, document._body) if el.tag == W_P else _Cell(el, document._body).paragraphs[-1]
-        p.add_run(" " + value)
+        if el.tag == W_P:  # noqa: SIM108 - clearer than a ternary with a type: ignore
+            target = Paragraph(el, document._body)
+        else:
+            target = _Cell(el, document._body).paragraphs[-1]  # type: ignore[arg-type]
+        target.add_run(" " + value)
         report.student_fields_filled.append(label)
 
     for el, f in fill_targets:
-        cell = _Cell(el, document._body)
+        cell = _Cell(el, document._body)  # type: ignore[arg-type]
         value = f.text if f.verification == "verified" else f"{f.text} ({UNVERIFIED})"
         para = cell.paragraphs[-1]
         if para.text.strip():
