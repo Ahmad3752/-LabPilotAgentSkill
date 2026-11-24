@@ -1,0 +1,12 @@
+name = "python"
+description = "Python notebook labs (pandas, matplotlib). In Google Colab the lab's own setup cells install anything else it needs."
+
+[runtime]
+cell_timeout_s = 600
+
+[python]
+# Packages the LOCAL fallback kernel needs (installed with `pip install labpilot[lab]`).
+packages = ["pandas>=2.1", "matplotlib>=3.8", "pyarrow>=15", "ipykernel>=6.29", "nbclient>=0.10", "nbformat>=5.9"]
+
+[preflight]
+imports = ["pandas", "matplotlib"]
