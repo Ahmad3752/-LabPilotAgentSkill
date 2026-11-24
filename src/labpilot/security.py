@@ -183,8 +183,15 @@ CODE_RULES: list[CodeRule] = [
     CodeRule(
         "destructive-fs",
         "deny",
-        re.compile(r"(rm\s+-rf\s+[/~]|shutil\.rmtree\(\s*['\"]?(/|~|[A-Za-z]:\\)|format\s+[A-Za-z]:)"),
-        "Destructive filesystem operation outside the run workspace.",
+        # deletes of the filesystem root, home directories, system folders or a drive root; lab workspace
+        # paths such as /content/<dir> (the Colab VM) or /tmp/<dir> are allowed
+        re.compile(
+            r"(rm\s+-[a-zA-Z]*r[a-zA-Z]*\s+(-[a-zA-Z]+\s+)*(/\*?(\s|$|;|&)|~|\$HOME|/(home|Users|root|etc|usr|bin|"
+            r"boot|var|opt|lib|sbin)(/|\s|$)|[A-Za-z]:[\\/]?(\s|$))"
+            r"|shutil\.rmtree\(\s*['\"]?(/['\"]|~|[A-Za-z]:\\\\?['\"]|/(home|Users|root|etc|usr)\b|os\.path\.expanduser)"
+            r"|format\s+[A-Za-z]:)"
+        ),
+        "Destructive filesystem operation outside the lab workspace (root, home, system folders or a drive).",
     ),
     CodeRule(
         "drive-mount",

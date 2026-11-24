@@ -117,5 +117,26 @@ def test_code_rules(code: str, rule: str, severity: str) -> None:
     assert not [d for d in denied2 if d.rule == rule]
 
 
+@pytest.mark.parametrize(
+    ("code", "denied"),
+    [
+        ("rm -rf /", True),
+        ("rm -rf / --no-preserve-root", True),
+        ("rm -rf ~", True),
+        ("rm -rf $HOME/x", True),
+        ("rm -rf /home/user", True),
+        ("rm -rf /etc", True),
+        ("import shutil\nshutil.rmtree('/')", True),
+        ("rm -rf /content/hdfs /content/hadoop-tmp", False),  # Colab VM lab workspace
+        ("rm -rf /content/hadoop-3.3.6 /content/hadoop-3.3.6.tar.gz", False),
+        ("rm -rf /tmp/build", False),
+        ("rm -f hadoop.tar.gz", False),
+    ],
+)
+def test_destructive_rule_targets_system_paths_not_lab_workspace(code: str, denied: bool) -> None:
+    hits = [f for f in scan_code("c", code) if f.rule == "destructive-fs"]
+    assert bool(hits) == denied, code
+
+
 def test_plain_code_is_clean() -> None:
     assert scan_code("c", "df = pd.read_csv('sales.csv')\nprint(df.head())\nmy_input_value = 3") == []
