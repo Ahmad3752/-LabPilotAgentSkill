@@ -86,6 +86,7 @@ def completion_checks(run: Run, plan: Plan) -> dict[str, dict[str, Any]]:
     else:
         probs = validate_answers(run, plan, answers)
         nv = [a.question_id for a in answers.answers if a.verification == "not_verified"]
+        nv += [f"table:{f.anchor.split('#')[0]}" for f in answers.table_cells if f.verification == "not_verified"]
         checks["answers_valid"] = {"ok": not probs and not nv, "detail": {"problems": probs, "not_verified": nv}}
     return checks
 
@@ -124,7 +125,8 @@ def export(run: Run, render: bool = True) -> dict[str, Any]:
     out_docx = out_dir / docx_name
     report = write_document(source=_source_copy(run), out_path=out_docx, run_dir=run.dir, plan=plan, contents=contents,
                             provenance=_provenance(run), student=m.student,
-                            student_fields=doc_info.get("student_fields", []))
+                            student_fields=doc_info.get("student_fields", []),
+                            table_fills=answers.table_cells if answers else [])
     structural = validate_docx(source=run.lab_dir / m.source_name, source_sha256=m.source_sha256, output=out_docx,
                                expected_images=report.inserted_images, removed_placeholders=report.removed_placeholders)
     checks["document_structure"] = {"ok": structural["ok"], "detail": structural}

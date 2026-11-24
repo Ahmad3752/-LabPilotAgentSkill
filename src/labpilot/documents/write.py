@@ -17,7 +17,7 @@ from docx.text.paragraph import Paragraph
 
 from labpilot.documents.anchors import W_P, W_TC, element_text, iter_blocks, normalize, resolve
 from labpilot.errors import LabPilotError
-from labpilot.models import Answer, EvidenceRecord, Plan, Task
+from labpilot.models import Answer, EvidenceRecord, Plan, TableCellFill, Task
 
 EMU_PER_INCH = 914400
 DXA_PER_INCH = 1440
@@ -41,6 +41,7 @@ class WriteReport:
     removed_placeholders: list[dict[str, str]] = field(default_factory=list)
     layout_changes: list[str] = field(default_factory=list)
     student_fields_filled: list[str] = field(default_factory=list)
+    table_fills: list[dict[str, str]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     review_required: list[str] = field(default_factory=list)
 
@@ -106,7 +107,8 @@ def _remove_placeholders(tc: Any, report: WriteReport, anchor: str) -> None:
     for p in paras:
         text = element_text(p)
         has_drawing = p.find(".//" + qn("w:drawing")) is not None
-        if text and PLACEHOLDER_RE.match(text) and not has_drawing:
+        is_label = text.rstrip().endswith(":")  # e.g. "Your answer:" stays; the answer goes below it
+        if text and PLACEHOLDER_RE.match(text) and not has_drawing and not is_label:
             report.removed_placeholders.append({"anchor": anchor, "text": normalize(text)})
             if len([b for b in iter_blocks(tc)]) > 1:
                 tc.remove(p)
@@ -229,6 +231,7 @@ def write_document(
     provenance: str,
     student: dict[str, str] | None = None,
     student_fields: list[dict[str, Any]] | None = None,
+    table_fills: list[TableCellFill] | None = None,
 ) -> WriteReport:
     shutil.copyfile(source, out_path)  # edit a fresh writable copy; the original stays read-only and untouched
     document = docx.Document(str(out_path))
@@ -271,6 +274,13 @@ def write_document(
                 except LabPilotError:
                     report.warnings.append(f"student field '{f['label']}' moved; not filled")
 
+    fill_targets: list[tuple[Any, TableCellFill]] = []
+    for f in table_fills or []:
+        try:
+            fill_targets.append((resolve(body, f.anchor), f))
+        except LabPilotError as exc:
+            report.review_required.append(f"table cell {f.anchor}: {exc.message} Value not written.")
+
     page_w = _available_width_in(document, None)
     for key, items in groups.items():
         el = resolved[key]
@@ -309,6 +319,17 @@ def write_document(
         p = Paragraph(el, document._body) if el.tag == W_P else _Cell(el, document._body).paragraphs[-1]
         p.add_run(" " + value)
         report.student_fields_filled.append(label)
+
+    for el, f in fill_targets:
+        cell = _Cell(el, document._body)
+        value = f.text if f.verification == "verified" else f"{f.text} ({UNVERIFIED})"
+        para = cell.paragraphs[-1]
+        if para.text.strip():
+            para = cell.add_paragraph()
+        run = para.add_run(value)
+        if f.verification != "verified":
+            run.font.color.rgb = RGBColor(0xB0, 0x00, 0x00)
+        report.table_fills.append({"anchor": f.anchor.split("#")[0], "text": f.text})
 
     document.save(str(out_path))
     return report

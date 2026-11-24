@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 from pathlib import Path
@@ -766,6 +767,31 @@ def validate_answers(run: Run, plan: Plan, answers: AnswersFile) -> list[str]:
     for s in answers.task_summaries:
         if s.task_id not in {t.id for t in plan.tasks}:
             problems.append(f"task summary for unknown task '{s.task_id}'")
+    if answers.table_cells:
+        import docx
+
+        body = docx.Document(str(_source_copy(run))).element.body
+        seen_cells: set[str] = set()
+        for f in answers.table_cells:
+            path = f.anchor.split("#")[0]
+            if not re.search(r"/r\d+/c\d+$", path):
+                problems.append(f"table cell '{f.anchor}' is not a table-cell anchor")
+                continue
+            if path in seen_cells:
+                problems.append(f"table cell '{f.anchor}' is filled twice")
+            seen_cells.add(path)
+            try:
+                resolve(body, f.anchor)
+            except LabPilotError as exc:
+                problems.append(f"table cell '{f.anchor}': {exc.message}")
+            if not f.text.strip():
+                problems.append(f"table cell '{f.anchor}': empty value")
+            if f.verification == "verified":
+                if not f.source_cell_ids:
+                    problems.append(f"table cell '{f.anchor}': cite the cells whose output contains this value")
+                bad = [c for c in f.source_cell_ids if m.cell_status.get(c) != ItemStatus.PASSED]
+                if bad:
+                    problems.append(f"table cell '{f.anchor}': cited cells {bad} did not pass")
     return problems
 
 

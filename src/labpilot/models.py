@@ -195,10 +195,20 @@ class TaskSummary(Strict):
     explanation: str  # what the code does, for the student
 
 
+class TableCellFill(Strict):
+    """A value the manual asks to copy into an existing table cell (e.g. job counters)."""
+
+    anchor: str  # cell anchor with fingerprint, from document.json `fill_in_tables`
+    text: str
+    source_cell_ids: list[str] = Field(default_factory=list)
+    verification: Literal["verified", "not_verified"] = "verified"
+
+
 class AnswersFile(Strict):
     schema_version: int = SCHEMA_VERSION
     answers: list[Answer]
     task_summaries: list[TaskSummary] = Field(default_factory=list)
+    table_cells: list[TableCellFill] = Field(default_factory=list)
 
 
 # ------------------------------------------------------------------ execution records

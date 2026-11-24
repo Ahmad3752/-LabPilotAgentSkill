@@ -48,6 +48,7 @@ MONO_FONTS = {
 }
 TASK_RE = re.compile(r"^\s*(?:Lab\s+)?(Task|Exercise|Activity|Problem)\s*[#:.\-]?\s*(\d+)\b\s*[:.\-–—]?\s*(.*)$", re.I)
 PART_RE = re.compile(r"^\s*\(?Part\s+([A-Z])\)?\s*[:.\-–—]?\s*(.*)$", re.I)
+QUESTION_PART_RE = re.compile(r"^\s*Question\s+(\d+)\s*[:.\-–—]\s*(.*)$", re.I)
 SOLUTION_RE = re.compile(
     r"\b(solution|answer|your code|paste (your )?(code|screenshot|output)|screenshot(s)? here|write your)\b", re.I
 )
@@ -107,6 +108,7 @@ class Inspection:
     environment: dict[str, Any] = field(default_factory=dict)
     student_fields: list[dict[str, Any]] = field(default_factory=list)
     images: list[dict[str, Any]] = field(default_factory=list)
+    fill_in_tables: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     requires_native_colab_evidence: bool = False
 
@@ -357,12 +359,14 @@ def _analyse(insp: Inspection) -> None:
             insp.tasks.append(task)
             continue
         pm = PART_RE.match(text)
-        if pm and task is not None and is_headingish:
-            letter = pm.group(1).upper()
+        qm = QUESTION_PART_RE.match(text) if b.heading_level is not None else None  # "Question 2: ..." headings
+        if (pm and is_headingish or qm) and task is not None:
+            label = pm.group(1).upper() if pm else qm.group(1)  # type: ignore[union-attr]
+            rest = (pm or qm).group(2).strip()  # type: ignore[union-attr]
             task["parts"].append(
                 {
-                    "id": f"{task['id']}.{letter}",
-                    "title": pm.group(2).strip() or f"Part {letter}",
+                    "id": f"{task['id']}.{label}",
+                    "title": rest or (f"Part {label}" if pm else f"Question {label}"),
                     "source_anchor": f"{b.anchor}#{b.fp}",
                     "questions": [],
                     "instructions": [],
@@ -390,12 +394,19 @@ def _analyse(insp: Inspection) -> None:
         lm = SOLUTION_LABEL_RE.match(label_cell.text)
         fill = cells[1] if (lm and len(cells) > 1) else label_cell
         task_hint = None
+        preceding = [x for x in insp.tasks if _anchor_before(x["source_anchor"].split("#")[0], t.anchor)]
         if lm and lm.group(1):
             task_hint = f"T{lm.group(1)}"
-        else:
-            preceding = [x for x in insp.tasks if _anchor_before(x["source_anchor"].split("#")[0], t.anchor)]
-            if preceding:
-                task_hint = preceding[-1]["id"]
+        elif preceding:
+            task_hint = preceding[-1]["id"]
+        # "Task 2 Solution" boxes cover a whole task; generic boxes ("Your answer:") belong to the unit above
+        scope = "task" if (lm and lm.group(1)) else "unit"
+        unit_hint = task_hint
+        if preceding:
+            parts_before = [p for p in preceding[-1]["parts"]
+                            if _anchor_before(p["source_anchor"].split("#")[0], t.anchor)]
+            if parts_before and preceding[-1]["id"] == task_hint:
+                unit_hint = parts_before[-1]["id"]
         insp.solution_boxes.append(
             {
                 "table_anchor": t.anchor,
@@ -403,11 +414,28 @@ def _analyse(insp: Inspection) -> None:
                 "fill_anchor": f"{fill.anchor}#{fill.fp}",
                 "placeholder": normalize(fill.text)[:200],
                 "task_hint": task_hint,
+                "unit_hint": unit_hint,
+                "scope": scope,
                 "shape": t.table_shape,
             }
         )
-        if task_hint and sum(1 for s in insp.solution_boxes if s["task_hint"] == task_hint) > 1:
-            insp.warnings.append(f"More than one solution box maps to {task_hint}; review the plan anchors.")
+    for hint in {s["unit_hint"] if s["scope"] == "unit" else s["task_hint"] for s in insp.solution_boxes}:
+        same = [s for s in insp.solution_boxes if (s["unit_hint"] if s["scope"] == "unit" else s["task_hint"]) == hint]
+        if hint and len(same) > 1:
+            insp.warnings.append(f"More than one solution box maps to {hint}; review the plan anchors.")
+    # fill-in tables (e.g. counters to copy): empty cells next to filled header cells
+    for t in tables:
+        if any(t.anchor == s["table_anchor"] for s in insp.solution_boxes):
+            continue
+        cells = [b for b in insp.blocks if b.kind == "cell" and _is_direct_cell(t.anchor, b.anchor)]
+        empty = [c for c in cells if not c.text.strip()]
+        if empty and len(empty) < len(cells):
+            insp.fill_in_tables.append({
+                "table_anchor": t.anchor,
+                "text": t.text[:200],
+                "empty_cells": [f"{c.anchor}#{c.fp}" for c in empty],
+                "cells": [{"anchor": f"{c.anchor}#{c.fp}", "text": c.text[:80]} for c in cells],
+            })
     if insp.tasks and not insp.solution_boxes:
         insp.warnings.append(
             "No solution boxes detected; answers will be inserted after each task (placement=after_source)."
@@ -445,10 +473,13 @@ def _is_direct_cell(table_anchor: str, cell_anchor: str) -> bool:
 def draft_plan(insp: Inspection, required_files: list[dict[str, Any]]) -> dict[str, Any]:
     """A starting point for the agent's plan. The agent must review it against the manual."""
     tasks: list[dict[str, Any]] = []
-    box_by_task = {}
+    box_by_task: dict[str, str] = {}
+    box_by_unit: dict[str, str] = {}
     for box in insp.solution_boxes:
-        if box["task_hint"] and box["task_hint"] not in box_by_task:
-            box_by_task[box["task_hint"]] = box["fill_anchor"]
+        if box.get("scope") == "unit" and box.get("unit_hint"):
+            box_by_unit.setdefault(box["unit_hint"], box["fill_anchor"])
+        elif box["task_hint"]:
+            box_by_task.setdefault(box["task_hint"], box["fill_anchor"])
     prev: str | None = "SETUP"
     tasks.append(
         {
@@ -465,7 +496,7 @@ def draft_plan(insp: Inspection, required_files: list[dict[str, Any]]) -> dict[s
     for t in insp.tasks:
         units = t["parts"] or [t]
         for u in units:
-            anchor = box_by_task.get(t["id"])
+            anchor = box_by_unit.get(u["id"]) or box_by_task.get(t["id"])
             tasks.append(
                 {
                     "id": u["id"],
