@@ -145,6 +145,8 @@ def setup(
     project_dir: Path = typer.Option(Path.cwd, "--project-dir"),  # noqa: B008
     wsl_distro: str = typer.Option(None, help="WSL distro with google-colab-cli installed (Windows colab-cli mode)"),
     register_mcp: bool = typer.Option(False, help="Register the official colab-mcp server with Claude Code"),
+    install_colab_cli: bool = typer.Option(False, help="Install the official google-colab-cli into a "
+                                           "LabPilot-owned environment (explicit opt-in)"),
     json_out: bool = JSON_OPT,
 ) -> None:
     """Install the LabPilot skill for your agent and record backend preferences (rerunnable, no duplicates)."""
@@ -156,6 +158,11 @@ def setup(
             raise LabPilotError(ErrorCode.BACKEND_UNAVAILABLE, f"Unknown backend '{backend}'.", exit_code=ExitCode.CONFIG)
         if scope not in ("project", "user"):
             raise LabPilotError(ErrorCode.BACKEND_UNAVAILABLE, "scope must be project or user", exit_code=ExitCode.CONFIG)
+        colab = None
+        if install_colab_cli:
+            from labpilot.colab_setup import install_colab_cli as do_install
+
+            colab = do_install()  # writes its command into the user config before we load it below
         cfg = load_config()
         installed = [install_skill(t) for t in skill_targets(agent, scope, Path(project_dir))]
         cfg["backend"] = backend
@@ -172,14 +179,32 @@ def setup(
         path = save_config(cfg)
         notes = ["Restart your agent (or reload its skills) so it discovers the LabPilot skill.",
                  "Then ask: Use LabPilot to work through the lab in this folder ..."]
-        if backend in ("colab-cli", "auto") and sys.platform == "win32" and not wsl_distro:
-            notes.append("google-colab-cli does not support native Windows; pass --wsl-distro after installing and "
-                         "signing in to it inside WSL, or use the local backend.")
+        if backend in ("colab-cli", "auto") and not cfg["colab_cli"].get("command") and not wsl_distro:
+            notes.append("Google Colab CLI not configured yet: rerun with --install-colab-cli, then `labpilot colab-login`.")
+        if colab and colab.get("experimental"):
+            notes.append("Upstream google-colab-cli lists Linux/macOS only; LabPilot's native-Windows mode is "
+                         "experimental until a signed-in run succeeds on this machine.")
+        if colab:
+            notes.append(colab["next"])
         if backend == "colab-mcp" and not register_mcp:
             notes.append("colab-mcp needs registration in Claude Code: rerun with --register-mcp --agent claude.")
-        return {"skills": installed, "config": str(path), "backend": backend, "mcp": mcp, "notes": notes}
+        return {"skills": installed, "config": str(path), "backend": backend, "colab_cli": colab, "mcp": mcp,
+                "notes": notes}
 
     _run(do, json_out)
+
+
+@app.command("colab-login")
+def colab_login() -> None:
+    """Sign in to Google Colab once with the official CLI flow (interactive; run it in your own terminal)."""
+    from labpilot.colab_setup import interactive_login
+
+    try:
+        code = interactive_login()
+    except LabPilotError as exc:
+        sys.stderr.write(f"error [{exc.code}]: {exc.message}\nnext: {exc.next_action}\n")
+        raise typer.Exit(int(exc.exit_code)) from None
+    raise typer.Exit(code)
 
 
 @app.command()
