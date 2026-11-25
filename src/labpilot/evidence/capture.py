@@ -152,7 +152,9 @@ def _capture_cell(
             {"cell_id": cid, "task_id": task_id, "code": "EVIDENCE_INVALID", "message": "cell not found in rendering"}
         )
         return
-    # widen the viewport for wide outputs instead of clipping them
+    # measure at the standard width first (an earlier wide cell may have widened the page), then widen only if this
+    # cell's own content (e.g. a wide table) needs it, instead of clipping it
+    page.set_viewport_size({"width": VIEWPORT_W, "height": 900})
     width = cell.evaluate("el => Math.ceil(Math.max(el.scrollWidth, el.getBoundingClientRect().width))")
     needed = min(MAX_VIEWPORT_W, max(VIEWPORT_W, int(width) + 48))
     page.set_viewport_size({"width": needed, "height": 900})
