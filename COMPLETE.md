@@ -71,6 +71,7 @@ The Word file is a review-ready learning artifact, not automatically certified a
 ### 2.2 Explicitly out of scope for v1
 
 - NUST/Nest LMS MCP, university login, WhatsApp bot, remote messaging, scheduled jobs, automatic course submission.
+  *Update 2026-11-26 (user decision):* read-only new-lab discovery through the Nuts LMS MCP (`moodle-mcp`) is now in scope, host-mediated as in §23 (`labpilot lms`). University login stays in `moodle-mcp`'s own command; LabPilot never handles LMS credentials. Submission, scheduled jobs and messaging remain out of scope.
 - Generic support for arbitrary technologies (Kafka, distributed clusters, proprietary software, GPU-only tasks) before tested profiles exist.
 - OCR of every arbitrary Word layout, arbitrary PDF/legacy `.doc` editing, macros, encrypted documents, a graphical application or cloud hosting.
 - A proprietary Colab-like browser UI masquerading as Google Colab; unauthorized scraping of Colab internals; using unsupported endpoints or bypassing restrictions.
@@ -628,7 +629,7 @@ Suggested commit sequence if authorized: `chore: initialize project and schemas`
 
 ## 23. Future LMS and WhatsApp integration — architectural boundary only
 
-The eventual goal is to message a bot and have it retrieve a lab manual and datasets from the NUST/Nest LMS through an existing authorized MCP, run LabPilot, and return the artifacts. Do not implement it now. No LMS credentials, WhatsApp APIs, browser scraping, webhook server, or external messaging dependencies in v1.
+The eventual goal is to message a bot and have it retrieve a lab manual and datasets from the NUST/Nest LMS through an existing authorized MCP, run LabPilot, and return the artifacts. *Update 2026-11-26:* the LMS half is now implemented as a read-only, host-mediated flow: the agent calls the Nuts LMS MCP tools, `labpilot lms check|stage|mark` classify and record labs, and `LmsStagedFolderInputProvider` maps the downloaded folder to the same `RunRequest`. The rest of this section still applies. Originally: do not implement it now. No LMS credentials, WhatsApp APIs, browser scraping, webhook server, or external messaging dependencies in v1.
 
 Keep the core independent of file origin by defining a small future `InputProvider` concept: accept a user-authorized assignment reference, return a local staged manual and files plus provenance. v1 implements only `LocalFolderInputProvider`. Define a `RunRequest` (input manifest, backend preference, output location, consent scope) and `RunResult` (status, artifacts, blockers) with JSON-serializable fields. Future LMS adapter can map authorized MCP downloads to the same local input interface; future messaging adapter can call the same workflow and deliver selected outputs only with explicit permission. No changes should be necessary to the notebook, evidence or Word pipeline. Future remote orchestration must separately address hosting, identity verification, access control, retries, provider quotas, privacy, academic rules and external delivery approvals. Never allow an untrusted WhatsApp message to trigger arbitrary shell commands or fetch another user's course data.
 

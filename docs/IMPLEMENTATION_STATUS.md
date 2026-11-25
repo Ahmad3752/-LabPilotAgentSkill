@@ -2,7 +2,7 @@
 
 This file is the source of truth for what has been **verified**, what is **implemented but not yet verified**, and what is **out of scope**. README claims must match it.
 
-Last updated: 2026-11-25.
+Last updated: 2026-11-26.
 
 ## Phase scope
 
@@ -38,6 +38,7 @@ This phase targets **Google Colab labs only**. Docker, local Spark/Java runtimes
 | Claude Code skill discovery | Installed to `.claude/skills/labpilot`. Not exercised in a separate session. |
 | macOS / Linux install scripts | Written (`scripts/install.sh`). Not run on a real Mac or Linux machine. |
 | `scripts/install.ps1` full clean-install run | Written. The smoke test was interrupted and has not been rerun. |
+| New-lab checks through the Nuts LMS MCP (`labpilot lms check / stage / mark / list`) | Host-mediated and read-only: the agent calls the `moodle-mcp` tools and passes their JSON to LabPilot, which never logs in or submits. **Verified so far:** `moodle-mcp` (commit b4aa67a, source reviewed) installs with `uv tool install`; its MCP server starts over stdio and lists its 15 tools with the parameters read from the source; Claude Code registration reports Connected; tool calls without a login return the "No credentials" error; unit tests cover classification, status, ledger, staging, provenance and doctor on synthetic payloads shaped like the tool output. On Windows, Smart App Control blocks uv's unsigned `moodle-mcp.exe`, so it runs as `<tool python> -m moodle_mcp`. **Not yet verified:** a real signed-in account (real assignments, statuses, downloads), and a full lab run started from an LMS download. |
 
 ## Known limitations (by design or upstream)
 
@@ -48,4 +49,4 @@ This phase targets **Google Colab labs only**. Docker, local Spark/Java runtimes
 
 ## Out of scope in this phase
 
-LMS integration, WhatsApp or other messaging, automatic submission, scheduled jobs, Docker and local Spark/Java profiles, native Colab UI capture.
+LMS submission and any LMS write, WhatsApp or other messaging, scheduled jobs (including background new-lab polling), Docker and local Spark/Java profiles, native Colab UI capture.

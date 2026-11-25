@@ -11,6 +11,7 @@ This file is for coding agents that change LabPilot's own code. To *use* LabPilo
 | Package | `src/labpilot` (CLI in `cli.py`) |
 | Workflow steps | `orchestration.py` (steps), `report.py` (export/validate/status/resume) |
 | Backends | `adapters/` |
+| LMS new-lab checks (Nuts LMS MCP, host-mediated) | `lms.py`, `inputs.py` |
 | Word documents | `documents/` |
 | Datasets | `datasets/` |
 | Notebook build and kernel runner | `notebooks/` |
@@ -36,4 +37,4 @@ python examples/run_demo.py <empty-dir> --backend colab-cli   # real Google Cola
 - Subprocesses use argument lists only, never shell strings.
 - Never collect credentials. Only stop or clean up resources that LabPilot owns.
 - Do not commit private lab manuals, datasets, `.labpilot/` or `output/`.
-- LMS and WhatsApp integrations are out of scope. Only the `inputs.InputProvider` boundary exists.
+- LMS: only read-only new-lab discovery through the Nuts LMS MCP (`moodle-mcp`), host-mediated: the agent calls the MCP tools and passes their JSON to `labpilot lms` (`lms.py`). LabPilot never logs in to the LMS, never handles LMS credentials and never submits. WhatsApp and other messaging are out of scope.
