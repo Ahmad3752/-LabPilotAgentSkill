@@ -462,8 +462,8 @@ def _analyse(insp: Inspection) -> None:
                   *(i for p in t["parts"] for i in p["instructions"])])
         for t in insp.tasks
     ).lower()
-    for label, pattern in PROMISED_SECTIONS.items():
-        if re.search(pattern, intro) and not re.search(pattern, covered):
+    for label, promise_re in PROMISED_SECTIONS.items():
+        if re.search(promise_re, intro) and not re.search(promise_re, covered):
             insp.uncovered_mentions.append(label)
             insp.warnings.append(
                 f"The introduction mentions '{label}' but no task covers it. If the lab expects it, add a closing "
