@@ -12,6 +12,7 @@ from labpilot import SCHEMA_VERSION, __version__
 from labpilot.documents.validate import render_pages, validate_docx
 from labpilot.documents.write import TaskContent, write_document
 from labpilot.errors import ErrorCode, LabPilotError
+from labpilot.evaluate import evaluate
 from labpilot.evidence.manifest import load_evidence
 from labpilot.evidence.validate import validate_evidence
 from labpilot.models import AnswersFile, ItemStatus, Plan, RunState, utcnow
@@ -137,6 +138,9 @@ def export(run: Run, render: bool = True) -> dict[str, Any]:
                                expected_images=report.inserted_images, removed_placeholders=report.removed_placeholders)
     checks["document_structure"] = {"ok": structural["ok"], "detail": structural}
     checks["placements_reliable"] = {"ok": not report.review_required, "detail": report.review_required}
+    quality = evaluate(run, out_docx)
+    checks["quality_review"] = {"ok": quality["ok"],
+                                "detail": [f for f in quality["findings"] if f["severity"] == "fail"]}
     complete = all(c["ok"] for c in checks.values())
     if not complete and "Completed" in out_docx.name:
         partial = out_docx.with_name(f"{stem}_Partial.docx")
@@ -276,6 +280,11 @@ def build_review(run: Run, plan: Plan, checks: dict[str, Any], rendered: dict[st
                  f"visual page render (optional): {rendered.get('reason') or rendered.get('pages', '')}")
     if write.get("layout_changes"):
         lines += ["", "## Layout adjustments made in the copy", ""] + [f"- {x}" for x in write["layout_changes"]]
+    ev = read_json(run.path("evaluation.json")) if run.path("evaluation.json").exists() else None
+    if ev and ev["findings"]:
+        lines += ["", "## Quality review findings", ""]
+        lines += [f"- [{f['severity'].upper()}] {f['where'] + ': ' if f['where'] else ''}{f['message']}"
+                  for f in ev["findings"]]
     if write.get("review_required"):
         lines += ["", "## Needs your review", ""] + [f"- {x}" for x in write["review_required"]]
     if m.blockers:

@@ -366,6 +366,20 @@ def validate(run_id: str, lab_dir: Path = LAB_DIR_OPT, json_out: bool = JSON_OPT
     _run(lambda: validate_run(_open(run_id, lab_dir)), json_out, incomplete=lambda res: not res.get("ok"))
 
 
+@app.command("evaluate")
+def evaluate_cmd(run_id: str, lab_dir: Path = LAB_DIR_OPT, json_out: bool = JSON_OPT) -> None:
+    """Quality review: prose answers, clean outputs, filled tables, evidence, covered sections."""
+    from labpilot.evaluate import evaluate
+
+    def do() -> dict[str, Any]:
+        run = _open(run_id, lab_dir)
+        out = run.manifest.outputs
+        path = Path(out["dir"], out["docx"]) if out.get("docx") else None
+        return evaluate(run, path)
+
+    _run(do, json_out, incomplete=lambda res: not res.get("ok"))
+
+
 def _final_status(run_id: str, lab_dir: Path | None) -> str:
     from labpilot.report import status as st
 
