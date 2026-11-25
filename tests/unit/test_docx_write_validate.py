@@ -50,7 +50,7 @@ def test_write_into_solution_boxes_and_validate(python_lab: Path, tmp_path: Path
     src, plan, contents = _setup(python_lab, tmp_path)
     before = sha256_file(src)
     out = tmp_path / "out.docx"
-    rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, provenance="test")
+    rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run on Google Colab")
     assert sha256_file(src) == before  # original untouched
     assert {p["mode"] for p in rep.placements} == {"anchor", "append"}  # SETUP has no box -> appendix
     assert len(rep.inserted_images) == len(contents)
@@ -64,8 +64,9 @@ def test_write_into_solution_boxes_and_validate(python_lab: Path, tmp_path: Path
     tables = d.tables
     box1 = tables[0].rows[1].cells[0]
     text = box1.text
-    assert "T1.A — Load Both Files" in text and "T1.B — Compute Revenue" in text
-    assert text.index("T1.A") < text.index("T1.B")
+    assert "Task 1, Part A: Load Both Files" in text and "Task 1, Part B: Compute Revenue" in text
+    assert text.index("Part A: Load") < text.index("Part B: Compute")
+    assert "Figure 1: Code and output (run on Google Colab)" in text
     assert "Paste your code" not in text
     assert len(box1._tc.findall(".//" + qn("a:blip"))) == 2  # inline images inside the cell
     trpr = tables[0].rows[1]._tr.trPr
@@ -78,7 +79,7 @@ def test_regeneration_does_not_duplicate(python_lab: Path, tmp_path: Path) -> No
     src, plan, contents = _setup(python_lab, tmp_path)
     out = tmp_path / "out.docx"
     for _ in range(2):
-        rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, provenance="t")
+        rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run on Google Colab")
     with zipfile.ZipFile(out) as zf:
         media = [n for n in zf.namelist() if n.startswith("word/media/")]
     assert len(media) == len(contents) + 1  # +1 original logo; second write started from the pristine source
@@ -90,7 +91,7 @@ def test_incomplete_tasks_are_labelled_not_verified(python_lab: Path, tmp_path: 
     contents[1] = TaskContent(task=contents[1].task, explanation=None, evidence=[],
                               answers=[(q.text, None) for q in contents[1].task.observation_questions], status="blocked")
     out = tmp_path / "out.docx"
-    write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, provenance="t")
+    write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run on Google Colab")
     text = "\n".join(p.text for p in docx.Document(str(out)).tables[0].rows[1].cells[0].paragraphs)
     assert "BLOCKED" in text and UNVERIFIED in text
 
@@ -98,7 +99,7 @@ def test_incomplete_tasks_are_labelled_not_verified(python_lab: Path, tmp_path: 
 def test_validation_detects_lost_original_text_and_missing_images(python_lab: Path, tmp_path: Path) -> None:
     src, plan, contents = _setup(python_lab, tmp_path)
     out = tmp_path / "out.docx"
-    rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, provenance="t")
+    rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run on Google Colab")
     d = docx.Document(str(out))
     victim = next(p for p in d.paragraphs if p.text.startswith("Read both CSV files"))
     victim._p.getparent().remove(victim._p)
@@ -116,7 +117,7 @@ def test_unresolvable_anchor_goes_to_flagged_appendix(python_lab: Path, tmp_path
     t = contents[1].task.model_copy(update={"solution_anchor": "b21/r1/c0#ffffffffffff"})
     contents[1] = TaskContent(task=t, explanation=None, evidence=contents[1].evidence, answers=[], status="passed")
     rep = write_document(source=src, out_path=tmp_path / "o.docx", run_dir=tmp_path, plan=plan, contents=contents,
-                         provenance="t")
+                         run_label="run on Google Colab")
     assert rep.review_required and "T1.A" in rep.review_required[0]
     assert {"task_id": "T1.A", "anchor": None, "mode": "append"} in rep.placements
 
@@ -125,7 +126,7 @@ def test_student_fields_only_when_supplied(python_lab: Path, tmp_path: Path) -> 
     src, plan, contents = _setup(python_lab, tmp_path)
     insp = inspect_docx(src, sha256_file(src))
     out = tmp_path / "s.docx"
-    write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, provenance="t",
+    write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run on Google Colab",
                    student={"name": "Test Student"}, student_fields=insp.student_fields)
     texts = [p.text for p in docx.Document(str(out)).paragraphs]
     assert any(t.startswith("Name:") and "Test Student" in t for t in texts)

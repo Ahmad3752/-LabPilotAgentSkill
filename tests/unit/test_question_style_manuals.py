@@ -74,7 +74,7 @@ def test_answers_keep_label_and_table_cells_are_filled(tmp_path: Path) -> None:
     fills = [TableCellFill(anchor=empty[0], text="200000", source_cell_ids=["c"]),
              TableCellFill(anchor=empty[1], text="200000", source_cell_ids=["c"])]
     out = tmp_path / "o.docx"
-    rep = write_document(source=p, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, provenance="t",
+    rep = write_document(source=p, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run on Google Colab",
                          table_fills=fills)
     assert rep.removed_placeholders == []  # "Your answer:" labels are kept
     assert len(rep.table_fills) == 2
@@ -84,3 +84,36 @@ def test_answers_keep_label_and_table_cells_are_filled(tmp_path: Path) -> None:
     v = validate_docx(source=p, source_sha256=sha256_file(p), output=out, expected_images=rep.inserted_images,
                       removed_placeholders=rep.removed_placeholders)
     assert v["ok"], v["problems"]
+
+
+def test_intro_promises_without_a_task_are_flagged(tmp_path: Path) -> None:
+    d = docx.Document()
+    d.add_paragraph("Lab 9: Synthetic Practice")
+    d.add_paragraph("This lab covers joins, YARN and proper cluster teardown.")
+    d.add_heading("Task 1: Joins", level=1)
+    d.add_paragraph("Join the two files.")
+    p = d.save(str(tmp_path / "m.docx")) or tmp_path / "m.docx"
+    insp = inspect_docx(p, sha256_file(p))
+    assert insp.uncovered_mentions == ["teardown"]
+    assert any("mentions 'teardown'" in w for w in insp.warnings)
+
+
+def test_end_section_and_appendix_title(tmp_path: Path) -> None:
+    p = _manual(tmp_path / "m.docx")
+    insp = inspect_docx(p, sha256_file(p))
+    data = draft_plan(insp, [])
+    data["appendix_title"] = "Appendix: Environment setup (re-run)"
+    data["tasks"].append({"id": "TEARDOWN", "title": "Cluster teardown and deliverables", "placement": "end",
+                          "depends_on": ["T3.2"], "required_evidence": []})
+    plan = Plan.model_validate(data)
+    contents = [TaskContent(task=t, explanation="x", evidence=[], answers=[], status="passed") for t in plan.tasks]
+    out = tmp_path / "o.docx"
+    rep = write_document(source=p, out_path=out, run_dir=tmp_path, plan=plan, contents=contents,
+                         run_label="run on Google Colab")
+    modes = {pl["task_id"]: pl["mode"] for pl in rep.placements}
+    assert modes["TEARDOWN"] == "end" and modes["SETUP"] == "append"
+    texts = [para.text for para in docx.Document(str(out)).paragraphs]
+    i_end, i_app = texts.index("Cluster teardown and deliverables"), texts.index("Appendix: Environment setup (re-run)")
+    assert i_end < i_app  # the closing section comes before the appendix
+    assert "Question 3.1: Total per group" in " ".join(
+        c.text for t in docx.Document(str(out)).tables for c in t._cells)

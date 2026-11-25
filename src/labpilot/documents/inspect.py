@@ -48,6 +48,12 @@ MONO_FONTS = {
 }
 TASK_RE = re.compile(r"^\s*(?:Lab\s+)?(Task|Exercise|Activity|Problem)\s*[#:.\-]?\s*(\d+)\b\s*[:.\-–—]?\s*(.*)$", re.I)
 PART_RE = re.compile(r"^\s*\(?Part\s+([A-Z])\)?\s*[:.\-–—]?\s*(.*)$", re.I)
+PROMISED_SECTIONS = {
+    "teardown": r"\bteardown\b|\btear(ing)? down\b|\bshut ?down\b|\bstop(ping)? (the )?(cluster|hadoop|daemons)\b",
+    "cleanup": r"\bclean ?up\b",
+    "deliverables": r"\bdeliverables?\b",
+    "submission": r"\bsubmission\b",
+}
 QUESTION_PART_RE = re.compile(r"^\s*Question\s+(\d+)\s*[:.\-–—]\s*(.*)$", re.I)
 SOLUTION_RE = re.compile(
     r"\b(solution|answer|your code|paste (your )?(code|screenshot|output)|screenshot(s)? here|write your)\b", re.I
@@ -109,6 +115,7 @@ class Inspection:
     student_fields: list[dict[str, Any]] = field(default_factory=list)
     images: list[dict[str, Any]] = field(default_factory=list)
     fill_in_tables: list[dict[str, Any]] = field(default_factory=list)
+    uncovered_mentions: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     requires_native_colab_evidence: bool = False
 
@@ -446,6 +453,22 @@ def _analyse(insp: Inspection) -> None:
     for task_ in insp.tasks:
         if not task_["parts"] and not task_["instructions"]:
             insp.warnings.append(f"{task_['id']} has no readable instructions; check images or layout.")
+
+    # things the introduction promises (teardown, deliverables, ...) that no task covers
+    first_task = insp.tasks[0]["source_anchor"].split("#")[0] if insp.tasks else None
+    intro = " ".join(b.text for b in paras if first_task is None or _anchor_before(b.anchor, first_task)).lower()
+    covered = " ".join(
+        " ".join([t["title"], *t["instructions"], *(p["title"] for p in t["parts"]),
+                  *(i for p in t["parts"] for i in p["instructions"])])
+        for t in insp.tasks
+    ).lower()
+    for label, pattern in PROMISED_SECTIONS.items():
+        if re.search(pattern, intro) and not re.search(pattern, covered):
+            insp.uncovered_mentions.append(label)
+            insp.warnings.append(
+                f"The introduction mentions '{label}' but no task covers it. If the lab expects it, add a closing "
+                "task with placement 'end' (it may live in an earlier lab's manual)."
+            )
 
 
 def _is_question(text: str) -> bool:

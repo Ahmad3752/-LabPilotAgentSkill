@@ -106,7 +106,7 @@ class Task(Strict):
     parent: str | None = None  # e.g. "T1" for "T1.A"; used to group parts in one solution box
     source_anchor: str | None = None
     solution_anchor: str | None = None
-    placement: Literal["anchor", "after_source", "append"] = "anchor"
+    placement: Literal["anchor", "after_source", "end", "append"] = "anchor"  # end = closing section after the last task
     depends_on: list[str] = Field(default_factory=list)
     instructions: list[str] = Field(default_factory=list)
     observation_questions: list[Question] = Field(default_factory=list)
@@ -127,6 +127,7 @@ class Plan(Strict):
     source_sha256: str
     profile: Literal["python"] = "python"  # Colab labs install anything else in their own setup cells
     requires_native_colab_evidence: bool = False
+    appendix_title: str = "Appendix: Environment setup"
     required_files: list[RequiredFile] = Field(default_factory=list)
     tasks: list[Task]
     notes: list[str] = Field(default_factory=list)

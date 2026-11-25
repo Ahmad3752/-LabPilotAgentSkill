@@ -94,6 +94,14 @@ def completion_checks(run: Run, plan: Plan) -> dict[str, dict[str, Any]]:
 # ------------------------------------------------------------------ export
 
 
+def run_label(run: Run) -> str:
+    """Short, accurate figure label: where the code ran (details live in execution_report.json)."""
+    executed_on = run.manifest.attempts[-1]["backend"] if run.manifest.attempts else (run.manifest.backend or "")
+    if executed_on.startswith("colab"):
+        return "run on Google Colab"
+    return "run in a local Jupyter kernel"
+
+
 def export(run: Run, render: bool = True) -> dict[str, Any]:
     plan = load_plan(run)
     m = run.manifest
@@ -119,12 +127,10 @@ def export(run: Run, render: bool = True) -> dict[str, Any]:
                                     answers=[(q.text, ans_by_q.get(q.id)) for q in t.observation_questions],
                                     status=status))
     doc_info = read_json(run.path("document.json")) if run.path("document.json").exists() else {}
-    from labpilot.orchestration import _provenance
-
     docx_name = f"{stem}_{'Completed' if pre_ok else 'Partial'}.docx"
     out_docx = out_dir / docx_name
     report = write_document(source=_source_copy(run), out_path=out_docx, run_dir=run.dir, plan=plan, contents=contents,
-                            provenance=_provenance(run), student=m.student,
+                            run_label=run_label(run), student=m.student,
                             student_fields=doc_info.get("student_fields", []),
                             table_fills=answers.table_cells if answers else [])
     structural = validate_docx(source=run.lab_dir / m.source_name, source_sha256=m.source_sha256, output=out_docx,

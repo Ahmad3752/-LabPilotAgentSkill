@@ -42,6 +42,7 @@ class WriteReport:
     layout_changes: list[str] = field(default_factory=list)
     student_fields_filled: list[str] = field(default_factory=list)
     table_fills: list[dict[str, str]] = field(default_factory=list)
+    figure_count: int = 0
     warnings: list[str] = field(default_factory=list)
     review_required: list[str] = field(default_factory=list)
 
@@ -176,9 +177,23 @@ def _picture(sink: _Sink, path: Path, rec: EvidenceRecord, avail_in: float) -> d
     return {"path": rec.path, "sha256": rec.sha256, "width_in": round(width, 3), "task_id": rec.task_id}
 
 
-def _write_task(sink: _Sink, run_dir: Path, content: TaskContent, avail: float, provenance: str, report: WriteReport) -> None:
+def display_heading(t: Task) -> str:
+    """Heading in the manual's own terms: 'Question 3.2: Add a combiner', 'Part A: ...', or the plain title."""
+    m = re.fullmatch(r"T(\d+)\.(\d+)", t.id)
+    if m:
+        return f"Question {m.group(1)}.{m.group(2)}: {t.title}"
+    m = re.fullmatch(r"T(\d+)\.([A-Z])", t.id)
+    if m:
+        return f"Task {m.group(1)}, Part {m.group(2)}: {t.title}"
+    m = re.fullmatch(r"T(\d+)", t.id)
+    if m:
+        return f"Task {m.group(1)}: {t.title}"
+    return t.title
+
+
+def _write_task(sink: _Sink, run_dir: Path, content: TaskContent, avail: float, run_label: str, report: WriteReport) -> None:
     t = content.task
-    _heading(sink, f"{t.id} — {t.title}")
+    _heading(sink, display_heading(t))
     if content.status != "passed":
         _text(
             sink,
@@ -190,8 +205,9 @@ def _write_task(sink: _Sink, run_dir: Path, content: TaskContent, avail: float, 
         _text(sink, "What the code does:", content.explanation)
     for rec in content.evidence:
         what = {"code-output": "Code and output", "code": "Code", "output": "Output"}[rec.kind]
-        part = f" (part {rec.part} of {rec.parts})" if rec.parts > 1 else ""
-        _label(sink, f"{what}{part} — cell {rec.cell_ids[0]} · {provenance}")
+        part = f", part {rec.part} of {rec.parts}" if rec.parts > 1 else ""
+        report.figure_count += 1
+        _label(sink, f"Figure {report.figure_count}: {what}{part} ({run_label})")
         report.inserted_images.append(_picture(sink, run_dir / rec.path, rec, avail))
     if content.answers:
         _label(sink, "Observations", italic=False)
@@ -228,7 +244,7 @@ def write_document(
     run_dir: Path,
     plan: Plan,
     contents: list[TaskContent],
-    provenance: str,
+    run_label: str,
     student: dict[str, str] | None = None,
     student_fields: list[dict[str, Any]] | None = None,
     table_fills: list[TableCellFill] | None = None,
@@ -242,6 +258,7 @@ def write_document(
     groups: dict[str, list[TaskContent]] = {}
     resolved: dict[str, Any] = {}
     after_source: list[tuple[TaskContent, Any | None]] = []
+    at_end: list[TaskContent] = []
     appended: list[TaskContent] = []
     for content in contents:
         t = content.task
@@ -261,6 +278,8 @@ def write_document(
             except LabPilotError as exc:
                 report.review_required.append(f"{t.id}: {exc.message} Solution appended at the end instead.")
                 appended.append(content)
+        elif t.placement == "end":
+            at_end.append(content)
         else:
             appended.append(content)
 
@@ -294,25 +313,30 @@ def write_document(
             sink = _Sink(document, before=nxt) if nxt is not None and nxt.tag != qn("w:sectPr") else _Sink(document, before=body.find(qn("w:sectPr")))
             avail = page_w
         for content in items:
-            _write_task(sink, run_dir, content, avail, provenance, report)
+            _write_task(sink, run_dir, content, avail, run_label, report)
             report.placements.append({"task_id": content.task.id, "anchor": key, "mode": "anchor"})
 
     for content, before in after_source:
         if before is None:
             before = body.find(qn("w:sectPr"))
         sink = _Sink(document, before=before)
-        _label(sink, "LabPilot solution (inserted after the task; the manual has no solution box here)")
-        _write_task(sink, run_dir, content, page_w, provenance, report)
+        _write_task(sink, run_dir, content, page_w, run_label, report)
         report.placements.append({"task_id": content.task.id, "anchor": None, "mode": "after_source"})
+
+    # closing sections the manual expects after the last task (e.g. cluster teardown), in plan order
+    for content in at_end:
+        sink = _Sink(document, before=body.find(qn("w:sectPr")))
+        _write_task(sink, run_dir, content, page_w, run_label, report)
+        report.placements.append({"task_id": content.task.id, "anchor": None, "mode": "end"})
 
     if appended:
         sect = body.find(qn("w:sectPr"))
         sink = _Sink(document, before=sect)
         p = sink.paragraph()
         p.add_run().add_break(WD_BREAK.PAGE)
-        _heading(sink, "Appendix — LabPilot solutions without a dedicated solution box", 13)
+        _heading(sink, plan.appendix_title, 13)
         for content in appended:
-            _write_task(sink, run_dir, content, page_w, provenance, report)
+            _write_task(sink, run_dir, content, page_w, run_label, report)
             report.placements.append({"task_id": content.task.id, "anchor": None, "mode": "append"})
 
     for el, label, value in student_targets:
