@@ -45,3 +45,37 @@ def test_log_like_answers_hidden_errors_empty_tables_and_missing_sections_fail(t
     assert {("answers_prose", "fail"), ("outputs_clean", "fail"), ("tables_filled", "fail"),
             ("sections_covered", "fail")} <= checks
     assert ("answers_prose", "warn") in checks  # also too short
+
+
+def test_clean_keeps_deliverables_and_refuses_unfinished_runs(tmp_path: Path) -> None:
+    import pytest
+
+    from labpilot.cleanup import clean_run, ensure_not_cleaned
+    from labpilot.errors import LabPilotError
+    from labpilot.models import RunState
+
+    run = _run(tmp_path, "Both runs printed the same totals, so the combiner did not change anything.", "ok",
+               filled=True, sections=[])
+    out = tmp_path / "output" / "Lab-x"
+    out.mkdir(parents=True)
+    for name in ("Lab_Completed.docx", "Lab.ipynb", "REVIEW.md"):
+        (out / name).write_text("x", encoding="utf-8")
+    (out / "screenshots").mkdir()
+    for d in ("executions/a001", "evidence/screenshots", "render/pages", "inputs", "data", "notebook"):
+        (run.dir / d).mkdir(parents=True, exist_ok=True)
+        (run.dir / d / "f.bin").write_bytes(b"0" * 1000)
+    run.manifest.outputs = {"dir": str(out), "docx": "Lab_Completed.docx", "notebook": "Lab.ipynb"}
+    run.manifest.state = RunState.PARTIAL
+    run.save()
+    with pytest.raises(LabPilotError):
+        clean_run(run)  # partial runs keep their workspace so they can resume
+    run.manifest.state = RunState.COMPLETED
+    run.save()
+    res = clean_run(run)
+    assert res["cleaned"] and res["freed_bytes"] >= 6000
+    assert sorted(res["removed"]) == ["data", "evidence", "executions", "inputs", "notebook", "render"]
+    assert sorted(p.name for p in out.iterdir()) == ["Lab.ipynb", "Lab_Completed.docx", "REVIEW.md", "screenshots"]
+    assert (run.dir / "manifest.json").exists() and (run.dir / "plan.json").exists()
+    with pytest.raises(LabPilotError):
+        ensure_not_cleaned(run)
+    assert clean_run(run)["already_clean"]

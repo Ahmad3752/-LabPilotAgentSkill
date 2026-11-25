@@ -90,7 +90,10 @@ def _open(run_id: str, lab_dir: Path | None):  # noqa: ANN202
 
 def _locked(run_id: str, lab_dir: Path | None, fn: Callable[[Any], dict[str, Any]]) -> Callable[[], dict[str, Any]]:
     def inner() -> dict[str, Any]:
+        from labpilot.cleanup import ensure_not_cleaned
+
         run = _open(run_id, lab_dir)
+        ensure_not_cleaned(run)  # a cleaned run has no working files left to modify
         with run.lock():
             return fn(run)
 
@@ -364,6 +367,40 @@ def validate(run_id: str, lab_dir: Path = LAB_DIR_OPT, json_out: bool = JSON_OPT
     from labpilot.report import validate_run
 
     _run(lambda: validate_run(_open(run_id, lab_dir)), json_out, incomplete=lambda res: not res.get("ok"))
+
+
+@app.command()
+def clean(run_id: str = typer.Argument(None, help="Run to clean (omit with --all)."),
+          all_runs: bool = typer.Option(False, "--all", help="Clean every COMPLETED run in the lab folder."),
+          force: bool = typer.Option(False, help="Also clean a run that is not COMPLETED (it can no longer resume)."),
+          lab_dir: Path = LAB_DIR_OPT, json_out: bool = JSON_OPT) -> None:
+    """Free the workspace of a COMPLETED lab; keep the Word file, notebook, screenshots and reports."""
+    from labpilot.cleanup import clean_run
+    from labpilot.models import RunState
+    from labpilot.workspace import Run, runs_root
+
+    def do() -> dict[str, Any]:
+        if run_id:
+            run = _open(run_id, lab_dir)
+            with run.lock():
+                return clean_run(run, force)
+        if not all_runs:
+            raise LabPilotError(ErrorCode.RUN_NOT_FOUND, "Give a run id or --all.")
+        results, skipped = [], []
+        root = runs_root(lab_dir or Path.cwd())
+        for p in sorted(root.iterdir()) if root.exists() else []:
+            if not (p / "manifest.json").exists():
+                continue
+            run = Run(p)
+            if run.manifest.state == RunState.COMPLETED or force:
+                with run.lock():
+                    results.append(clean_run(run, force))
+            else:
+                skipped.append({"run_id": run.id, "state": str(run.manifest.state)})
+        return {"cleaned": results, "skipped_not_completed": skipped,
+                "freed_mb": round(sum(r["freed_bytes"] for r in results) / 1e6, 1)}
+
+    _run(do, json_out)
 
 
 @app.command("evaluate")

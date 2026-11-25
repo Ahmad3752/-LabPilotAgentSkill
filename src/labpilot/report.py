@@ -183,6 +183,10 @@ def export(run: Run, render: bool = True) -> dict[str, Any]:
 def validate_run(run: Run) -> dict[str, Any]:
     plan = load_plan(run)
     m = run.manifest
+    if m.backend_state.get("cleaned_at"):  # working files removed after completion: report the final result
+        checks = m.validation.get("checks", {})
+        return {"run_id": run.id, "ok": all(c["ok"] for c in checks.values()), "status": str(m.state),
+                "cleaned": True, "checks": redact_obj(checks), "output_dir": m.outputs.get("dir")}
     checks = completion_checks(run, plan)
     out = m.outputs
     if out.get("docx") and Path(out["dir"], out["docx"]).exists():
@@ -302,6 +306,8 @@ def build_review(run: Run, plan: Plan, checks: dict[str, Any], rendered: dict[st
 
 def next_action(run: Run) -> dict[str, str]:
     m = run.manifest
+    if m.backend_state.get("cleaned_at"):
+        return {"actor": "none", "action": "done", "detail": f"Completed and cleaned. Open {m.outputs.get('dir')}"}
     if not run.path("plan.json").exists():
         return {"actor": "agent", "action": "plan",
                 "detail": "Review document.json + draft_plan.json, write plan.json, run `labpilot plan`."}
@@ -343,6 +349,9 @@ def next_action(run: Run) -> dict[str, str]:
                 "detail": "Write grounded answers.json from the real outputs and run `labpilot answers`."}
     if m.state not in (RunState.COMPLETED, RunState.PARTIAL) or not m.outputs:
         return {"actor": "labpilot", "action": "export", "detail": "labpilot export <run-id>"}
+    if m.state == RunState.COMPLETED:
+        return {"actor": "agent", "action": "clean",
+                "detail": "After the review, `labpilot clean <run-id>` frees the workspace and keeps the deliverables."}
     if user_blockers:
         return {"actor": "user", "action": "resolve-blockers", "detail": "; ".join(b.next_action for b in user_blockers)}
     return {"actor": "none", "action": "done" if m.state == RunState.COMPLETED else "review",
