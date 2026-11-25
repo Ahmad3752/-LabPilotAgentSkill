@@ -1,9 +1,9 @@
 """Input providers: where a lab manual and its files come from.
 
-v1 implements only LocalFolderInputProvider. A future LMS provider (through an
-authorised MCP) or messaging front-end would return the same RunRequest of
-locally staged files with provenance, so the notebook, evidence and Word
-pipeline need no changes. Nothing here talks to an LMS or messaging service.
+LocalFolderInputProvider reads a folder the user prepared. LmsStagedFolderInputProvider reads a
+folder the host agent filled through the Nuts LMS MCP (see `labpilot.lms`): same RunRequest, plus
+LMS provenance. Both return locally staged files, so the notebook, evidence and Word pipeline
+need no changes. Nothing here talks to an LMS or messaging service.
 """
 
 from __future__ import annotations
@@ -48,3 +48,28 @@ class LocalFolderInputProvider:
                 provenance={"provider": self.name, "folder": folder.name},
             )
         )
+
+
+class LmsStagedFolderInputProvider:
+    """A lab folder downloaded with the Nuts LMS MCP and recorded by `labpilot lms stage`."""
+
+    name = "nuts-lms-mcp"
+
+    def fetch(self, reference: str, staging_dir: Path | None = None) -> RunRequest:
+        from labpilot.lms import read_source
+
+        request = LocalFolderInputProvider().fetch(reference, staging_dir)
+        folder = Path(request.inputs.manual_path).parent
+        source = read_source(folder)
+        if source is None:
+            raise LabPilotError(
+                ErrorCode.DATASET_MISSING,
+                f"{folder.name} has no lms_source.json; stage it with `labpilot lms stage` first.",
+            )
+        request.inputs.provenance = {
+            "provider": self.name,
+            "folder": folder.name,
+            **{k: str(source[k]) for k in ("site", "course", "courseid", "assignid", "name", "duedate")
+               if source.get(k) is not None},
+        }
+        return request

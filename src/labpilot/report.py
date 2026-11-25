@@ -374,6 +374,7 @@ def status(run: Run) -> dict[str, Any]:
                                  "traceback_tail": redact((r.get("traceback") or "")[-2500:])})
     return {
         "run_id": run.id, "state": str(m.state), "lab_title": m.lab_title, "synthetic_demo": m.synthetic,
+        "input_provenance": m.input_provenance,
         "backend": m.backend, "profile": m.profile, "attempt": m.current_attempt,
         "executed_on": m.attempts[-1]["backend"] if m.attempts else None,
         "tasks": {t.id: str(m.task_status.get(t.id, "pending")) for t in plan.tasks} if plan else {},

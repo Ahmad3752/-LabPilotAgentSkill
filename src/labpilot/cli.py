@@ -131,6 +131,9 @@ def doctor(json_out: bool = JSON_OPT, project_dir: Path = typer.Option(Path.cwd,
         lines.append(f"{mark(cc.get('authenticated'))}colab-cli: {cc.get('version') or cc.get('detail', '')}"
                      + ("" if cc.get("authenticated") or not cc.get("version") else " (not signed in)"))
         lines.append(f"{mark(r['colab_mcp']['registered'])}colab-mcp: {r['colab_mcp']['detail']}")
+        lm = r["nuts_lms"]
+        lines.append(f"{mark(lm['ready'])}Nuts LMS MCP (optional, new-lab checks): "
+                     + ("ready" if lm["ready"] else lm["fix"]))
         pr = r["page_renderer"]
         lines.append(f"{mark(pr['available'])}Word page rendering (optional): {pr['kind'] or 'none'}")
         lines.append(f"ready: colab={r['ready_for_colab']} local fallback={r['ready_for_local_fallback']}")
@@ -489,6 +492,89 @@ def runs(lab_dir: Path = LAB_DIR_OPT, json_out: bool = JSON_OPT) -> None:
         return {"runs": items}
 
     _run(do, json_out)
+
+
+# ---------------------------------------------------------------- LMS (Nuts LMS MCP, host-mediated)
+
+lms_app = typer.Typer(no_args_is_help=True, help="Find new labs on the LMS via the Nuts LMS MCP (moodle-mcp). The host "
+                      "agent calls the MCP tools and passes their JSON here; LabPilot never logs in to the LMS.")
+app.add_typer(lms_app, name="lms")
+SITE_OPT = typer.Option(None, "--site", help="LMS base URL, to keep labs of different sites apart (optional).")
+
+
+@lms_app.command("check")
+def lms_check(
+    assignments: Path = typer.Option(..., "--assignments", help="Saved JSON output of the `list_assignments` tool."),  # noqa: B008
+    status_files: list[Path] = typer.Option(None, "--status", help="Saved `assignment_status` JSON (repeatable)."),  # noqa: B008
+    match: str = typer.Option(None, "--match", help="Regex for lab names (default: names containing 'lab')."),
+    include_past: bool = typer.Option(False, "--include-past", help="Also list labs whose deadline has passed."),
+    root: str = typer.Option(None, "--root", help="Base folder for suggested lab folders (default: lms-labs)."),
+    site: str = SITE_OPT,
+    json_out: bool = JSON_OPT,
+) -> None:
+    """List new labs: lab-like name, still open, not submitted, not yet downloaded/processed/ignored."""
+    from labpilot import lms
+
+    def do() -> dict[str, Any]:
+        statuses = [lms.load_tool_json(p, "assignment_status") for p in status_files or []]
+        return lms.check_labs(lms.load_tool_json(assignments, "list_assignments"), statuses, site=site,
+                              pattern=match or lms.DEFAULT_LAB_PATTERN, include_past=include_past,
+                              root=root or lms.DEFAULT_ROOT)
+
+    def human(r: dict[str, Any]) -> str:
+        c = r["counts"]
+        lines = [f"{c['new']} new lab(s) · {c['in_progress']} in progress · {c['handled']} handled · "
+                 f"{c['submitted']} submitted · {c['closed']} closed · {c['not_labs']} other assignments"]
+        for lab in r["new_labs"]:
+            flags = [lab["submission_status"]] + (["overdue"] if lab["overdue"] else []) + \
+                    (["not open yet"] if lab["not_open_yet"] else [])
+            lines.append(f"  [{lab['assignid']}] {lab['course']}: {lab['name']}  due {lab['duedate'] or '-'}  "
+                         f"({', '.join(flags)})")
+        for lab in r["in_progress"]:
+            lines.append(f"  in progress [{lab['assignid']}] {lab['name']} -> {lab['folder']}")
+        lines.append(f"next: {r['next']}")
+        return "\n".join(lines)
+
+    _run(do, json_out, human)
+
+
+@lms_app.command("stage")
+def lms_stage(
+    folder: Path = typer.Argument(..., help="Lab folder the agent filled with the MCP `download_file` tool."),  # noqa: B008
+    assignments: Path = typer.Option(..., "--assignments", help="Saved `list_assignments` JSON."),  # noqa: B008
+    assign_id: int = typer.Option(..., "--assign-id", help="assignid of this lab."),
+    source_url: list[str] = typer.Option(None, "--source-url", help="Moodle fileurl a file came from (repeatable)."),  # noqa: B008
+    site: str = SITE_OPT,
+    json_out: bool = JSON_OPT,
+) -> None:
+    """Record where a downloaded lab came from (lms_source.json) and mark it in progress."""
+    from labpilot import lms
+
+    _run(lambda: lms.stage_lab(folder, lms.load_tool_json(assignments, "list_assignments"), assign_id, site=site,
+                               source_urls=source_url or []), json_out)
+
+
+@lms_app.command("mark")
+def lms_mark(
+    assign_id: int = typer.Argument(..., help="assignid of the lab."),
+    state: str = typer.Option(..., "--state", help="processed (run completed), ignored (user skipped) or downloaded."),
+    run_id: str = typer.Option(None, "--run-id", help="LabPilot run that completed this lab."),
+    name: str = typer.Option(None, "--name", help="Lab name, for the ledger listing."),
+    site: str = SITE_OPT,
+    json_out: bool = JSON_OPT,
+) -> None:
+    """Record a lab as processed or ignored so `lms check` stops reporting it."""
+    from labpilot import lms
+
+    _run(lambda: lms.mark_lab(assign_id, state, site=site, run_id=run_id, name=name), json_out)
+
+
+@lms_app.command("list")
+def lms_list(json_out: bool = JSON_OPT) -> None:
+    """Show the labs LabPilot has recorded (downloaded, processed or ignored)."""
+    from labpilot import lms
+
+    _run(lms.list_ledger, json_out)
 
 
 def main() -> None:

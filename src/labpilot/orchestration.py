@@ -165,6 +165,21 @@ def _set_blockers(run: Run, kind_prefix: str, blockers: list[Blocker]) -> None:
 # ====================================================================== init / inspect
 
 
+def _lms_provenance(lab_dir: Path, manual_name: str, digest: str) -> dict[str, str]:
+    """LMS origin of the manual, if `labpilot lms stage` recorded it and the file is unchanged since."""
+    from labpilot.lms import read_source
+
+    source = read_source(lab_dir)
+    if not source:
+        return {"provider": "local-folder"}
+    staged = {f.get("name"): f.get("sha256") for f in source.get("files", [])}
+    out = {"provider": str(source["provider"]),
+           **{k: str(source[k]) for k in ("site", "course", "courseid", "assignid", "cmid", "name", "duedate", "staged_at")
+              if source.get(k) is not None}}
+    out["manual_matches_download"] = str(staged.get(manual_name) == digest).lower()
+    return out
+
+
 def init_run(lab_doc: Path, data_dir: Path | None = None, student: dict[str, str] | None = None,
              synthetic: bool = False) -> Run:
     lab_doc = lab_doc.expanduser()
@@ -180,6 +195,7 @@ def init_run(lab_doc: Path, data_dir: Path | None = None, student: dict[str, str
     manifest = RunManifest(
         run_id=new_run_id(), lab_dir=str(lab_dir), source_name=source_name, source_sha256=digest,
         student={k: v for k, v in (student or {}).items() if v}, synthetic=synthetic,
+        input_provenance=_lms_provenance(lab_dir, lab_doc.name, digest),
     )
     run = create_run(lab_dir, manifest)
     run.inputs_dir.mkdir(parents=True, exist_ok=True)

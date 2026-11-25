@@ -24,6 +24,7 @@ output/
 *.parquet
 *.xlsx
 private/
+lms-labs/
 
 # Secrets, tokens, browser state
 .env

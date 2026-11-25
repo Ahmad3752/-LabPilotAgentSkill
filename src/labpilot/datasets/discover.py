@@ -10,6 +10,7 @@ from labpilot.security import is_within
 
 DATA_SUFFIXES = {".csv", ".tsv", ".json", ".jsonl", ".xlsx", ".xls", ".parquet", ".txt", ".png", ".jpg", ".jpeg", ".xml", ".zip"}
 SKIP_DIRS = {".labpilot", "output", ".git", ".venv", "venv", "__pycache__", "node_modules", ".ipynb_checkpoints"}
+SKIP_FILES = {"lms_source.json"}  # LabPilot's own LMS provenance record, never a dataset
 MAX_DEPTH = 3
 MAX_FILES = 2000
 
@@ -34,7 +35,7 @@ def list_candidate_files(lab_dir: Path) -> list[Path]:
                 if p.name in SKIP_DIRS or p.name.startswith("."):
                     continue
                 walk(p, depth + 1)
-            elif p.suffix.lower() in DATA_SUFFIXES and p.is_file():
+            elif p.suffix.lower() in DATA_SUFFIXES and p.is_file() and p.name not in SKIP_FILES:
                 found.append(p)
 
     walk(root, 0)

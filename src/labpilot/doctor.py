@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -46,6 +47,46 @@ def mcp_registration() -> dict[str, Any]:
     return {"registered": bool(found), "where": found,
             "detail": ("colab-mcp entry found in " + ", ".join(found)) if found else "no colab-mcp registration found",
             "note": "Tool availability can only be confirmed by the host agent (dynamic tools)."}
+
+
+def nuts_lms() -> dict[str, Any]:
+    """Nuts LMS MCP (moodle-mcp): installed, signed in (token file exists; never read), registered with an agent."""
+    import os
+
+    exe = shutil.which("moodle-mcp")
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "moodle-mcp"
+    signed_in = any(cache.glob("*.token.json")) if cache.is_dir() else False
+    where = []
+    for path in (Path.home() / ".claude.json", Path.cwd() / ".mcp.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        servers = dict(data.get("mcpServers", {}))
+        for proj in (data.get("projects") or {}).values():
+            servers.update(proj.get("mcpServers", {}) or {})
+        # `moodle-mcp serve`, or `<python> -m moodle_mcp serve` where Smart App Control blocks the uv .exe launcher
+        if any(re.search(r"moodle[-_]mcp", f"{s.get('command', '')} {' '.join(map(str, s.get('args') or []))}")
+               for s in servers.values() if isinstance(s, dict)):
+            where.append(f"claude:{path.name}")
+    codex_cfg = Path.home() / ".codex" / "config.toml"
+    if codex_cfg.exists() and re.search(r"moodle[-_]mcp", codex_cfg.read_text(encoding="utf-8", errors="ignore")):
+        where.append("codex:config.toml")
+    # On Windows, Smart App Control can block uv's unsigned moodle-mcp.exe launcher; the tool's own
+    # (signed python.org) interpreter running `-m moodle_mcp` works.
+    run = "moodle-mcp"
+    tool_py = Path(os.environ.get("APPDATA", "")) / "uv" / "tools" / "nutslms-mcp" / "Scripts" / "python.exe"
+    if exe and sys.platform == "win32" and tool_py.exists():
+        run = f'"{tool_py}" -m moodle_mcp'
+    fix = None
+    if not exe:
+        fix = "uv tool install git+https://github.com/deeznust42/nutslms-mcp"
+    elif not signed_in:
+        fix = f"Run `{run} login` in your own terminal (LabPilot never asks for your LMS password)."
+    elif not where:
+        fix = f"claude mcp add moodle -- {run} serve   (then restart the agent)"
+    return {"installed": bool(exe), "signed_in": signed_in, "registered": bool(where), "where": where,
+            "ready": bool(exe and signed_in and where), "fix": fix}
 
 
 def _browser() -> dict[str, Any]:
@@ -131,6 +172,7 @@ def doctor(project_dir: Path | None = None) -> dict[str, Any]:
         "wsl": _wsl(),
         "colab_cli": _colab_cli(),
         "colab_mcp": mcp_registration(),
+        "nuts_lms": nuts_lms(),
         "page_renderer": {"available": bool(find_renderer() or find_word()),
                           "kind": "libreoffice" if find_renderer() else ("microsoft-word" if find_word() else None)},
         "config": {"backend": cfg.get("backend"), "telemetry": cfg.get("telemetry")},

@@ -346,6 +346,7 @@ class RunManifest(BaseModel):
     lab_title: str | None = None
     synthetic: bool = False  # explicitly labelled synthetic/demo data run; never the real assignment
     student: dict[str, str] = Field(default_factory=dict)  # only explicit user-supplied fields
+    input_provenance: dict[str, str] = Field(default_factory=dict)  # e.g. LMS course/assignment of the manual
     profile: str | None = None
     backend: str | None = None
     datasets: list[DatasetEntry] = Field(default_factory=list)
