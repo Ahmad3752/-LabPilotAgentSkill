@@ -684,7 +684,9 @@ def _provenance(run: Run) -> str:
     bits = [f"local rendering of the notebook executed on {backend}"]
     if rt.get("python"):
         bits.append(f"Python {rt['python']}")
-    if rt.get("pyspark"):
+    # mention PySpark only when the lab actually uses it (Colab images ship it preinstalled)
+    uses_spark = run.source_notebook.exists() and "pyspark" in run.source_notebook.read_text(encoding="utf-8").lower()
+    if rt.get("pyspark") and uses_spark:
         bits.append(f"PySpark {rt['pyspark']}")
     bits.append(f"run {run.id}/{m.current_attempt}")
     if m.synthetic:
