@@ -36,6 +36,9 @@ EVIDENCE_CSS = """
     font-size: 13.5px !important; line-height: 1.4 !important;
   }
   .jp-RenderedHTMLCommon table { font-size: 12.5px !important; }
+  /* wrap long log lines (e.g. YARN application lists) at page width instead of widening the image until the
+     text becomes unreadably small in the document; the text itself is unchanged */
+  .jp-OutputArea-output pre, .jp-RenderedText pre { white-space: pre-wrap !important; overflow-wrap: anywhere; }
   .labpilot-provenance { font: 11px sans-serif; color: #555; padding: 4px 16px; border-bottom: 1px solid #ddd; }
 </style>
 """

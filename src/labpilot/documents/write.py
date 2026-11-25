@@ -146,9 +146,10 @@ def _heading(sink: _Sink, text: str, size: int = 12) -> None:
     r.font.size = Pt(size)
 
 
-def _label(sink: _Sink, text: str, italic: bool = True) -> None:
+def _label(sink: _Sink, text: str, italic: bool = True, keep_with_next: bool = True) -> None:
     p = sink.paragraph()
-    p.paragraph_format.keep_with_next = True
+    p.paragraph_format.keep_with_next = keep_with_next
+    p.paragraph_format.space_after = Pt(6)
     r = p.add_run(text)
     r.italic = italic
     r.font.size = Pt(9)
@@ -165,13 +166,14 @@ def _text(sink: _Sink, label: str | None, text: str, color: RGBColor | None = No
         r.font.color.rgb = color
 
 
-def _picture(sink: _Sink, path: Path, rec: EvidenceRecord, avail_in: float) -> dict[str, Any]:
+def _picture(sink: _Sink, path: Path, rec: EvidenceRecord, avail_in: float, keep_with_next: bool = False) -> dict[str, Any]:
     natural_w = rec.width / CAPTURE_DPI
     natural_h = rec.height / CAPTURE_DPI
     width = min(natural_w, avail_in)
     if natural_h * (width / natural_w) > MAX_IMAGE_HEIGHT_IN:
         width = MAX_IMAGE_HEIGHT_IN * natural_w / natural_h
     p = sink.paragraph()
+    p.paragraph_format.keep_with_next = keep_with_next
     run = p.add_run()
     run.add_picture(str(path), width=Emu(int(width * EMU_PER_INCH)))
     return {"path": rec.path, "sha256": rec.sha256, "width_in": round(width, 3), "task_id": rec.task_id}
@@ -207,8 +209,9 @@ def _write_task(sink: _Sink, run_dir: Path, content: TaskContent, avail: float, 
         what = {"code-output": "Code and output", "code": "Code", "output": "Output"}[rec.kind]
         part = f", part {rec.part} of {rec.parts}" if rec.parts > 1 else ""
         report.figure_count += 1
-        _label(sink, f"Figure {report.figure_count}: {what}{part} ({run_label})")
-        report.inserted_images.append(_picture(sink, run_dir / rec.path, rec, avail))
+        # caption BELOW its image and kept on the same page, so a caption can never be stranded above the wrong figure
+        report.inserted_images.append(_picture(sink, run_dir / rec.path, rec, avail, keep_with_next=True))
+        _label(sink, f"Figure {report.figure_count}: {what}{part} ({run_label})", keep_with_next=False)
     if content.answers:
         _label(sink, "Observations", italic=False)
         for qtext, ans in content.answers:
