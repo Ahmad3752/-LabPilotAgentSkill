@@ -30,7 +30,10 @@ def _manual(path: Path) -> Path:
     counters.rows[1].cells[0].text = "Map output records"
     counters.rows[2].cells[0].text = "Reduce input records"
     d.add_paragraph("1. Did the result change?")
+    d.add_paragraph("2. Are the outputs sorted together as one list? Explain.")
     d.add_table(rows=1, cols=1).rows[0].cells[0].text = "Your answer:"
+    hdr = d.sections[0].header.paragraphs[0]
+    hdr.text = "Synthetic header"
     d.save(str(path))
     return path
 
@@ -47,6 +50,8 @@ def test_question_sections_become_units_with_their_own_boxes(tmp_path: Path) -> 
     assert by_id["T3.1"]["solution_anchor"] == boxes[0]["fill_anchor"]
     assert by_id["T3.2"]["solution_anchor"] == boxes[1]["fill_anchor"]
     assert len(insp.fill_in_tables) == 1 and len(insp.fill_in_tables[0]["empty_cells"]) == 4
+    t32 = next(p for t in insp.tasks for p in t["parts"] if p["id"] == "T3.2")
+    assert [q["text"][:5] for q in t32["questions"]] == ["1. Di", "2. Ar"]  # "...? Explain." is a question too
 
 
 def test_answers_keep_label_and_table_cells_are_filled(tmp_path: Path) -> None:

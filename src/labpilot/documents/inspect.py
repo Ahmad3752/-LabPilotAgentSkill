@@ -450,7 +450,13 @@ def _analyse(insp: Inspection) -> None:
 
 def _is_question(text: str) -> bool:
     t = text.strip()
-    return t.endswith("?") or (bool(QUESTION_START_RE.match(t)) and len(t) < 400 and "?" in t)
+    if t.endswith("?"):
+        return True
+    if len(t) >= 400 or "?" not in t:
+        return False
+    # "3. Are the files sorted together? Explain." / "(b) Why ...? Discuss."
+    numbered = re.match(r"^\s*(\d+[.)]|\(?[a-z]\))\s+", t)
+    return bool(QUESTION_START_RE.match(t) or numbered)
 
 
 def _anchor_key(anchor: str) -> list[int]:

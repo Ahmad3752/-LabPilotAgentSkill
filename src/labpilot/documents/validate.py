@@ -104,9 +104,11 @@ def validate_docx(
     src_z, out_z = zipfile.ZipFile(source), zipfile.ZipFile(output)
     src_hf = sorted(n for n in src_z.namelist() if n.startswith(("word/header", "word/footer")))
     out_hf = sorted(n for n in out_z.namelist() if n.startswith(("word/header", "word/footer")))
-    checks["headers_footers_preserved"] = all(out_z.read(n) == src_z.read(n) for n in src_hf if n in out_hf) and set(
-        src_hf
-    ) <= set(out_hf)
+    # compare the parsed XML (canonical form), not raw bytes: python-docx re-serialises these parts on save,
+    # which changes only the XML declaration quoting and line endings
+    checks["headers_footers_preserved"] = set(src_hf) <= set(out_hf) and all(
+        _canonical(out_z.read(n)) == _canonical(src_z.read(n)) for n in src_hf
+    )
     src_z.close()
     out_z.close()
     if not checks["headers_footers_preserved"]:
@@ -118,6 +120,13 @@ def validate_docx(
         problems.append("page setup changed")
 
     return {"ok": not problems, "checks": checks, "problems": problems}
+
+
+def _canonical(blob: bytes) -> bytes:
+    from lxml import etree
+
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
+    return etree.tostring(etree.fromstring(blob, parser), method="c14n")
 
 
 def find_renderer() -> str | None:
