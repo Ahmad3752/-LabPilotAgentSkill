@@ -49,13 +49,24 @@ Progress lines go to stderr. Work from the lab folder (or pass `--lab-dir`).
    fix only the relevant cells, rebuild and execute again. Stop at the repair budget and report.
    Colab MCP backend: follow `host_actions.json`, then `labpilot record-execution` (see references).
 8. `labpilot capture <id> --json`. If a cell produced no output, add a real display and go back to step 6.
-9. Write `answers.json` from the ACTUAL outputs (`notebook/executed.ipynb`, `labpilot status --json`).
-   Cite `source_cell_ids`. Use `verification: "verified"` only for cells that passed; use `not_verified` when the
-   data/runtime is unavailable. Report discrepancies instead of forcing the expected conclusion. Add a one-paragraph
-   `task_summaries` entry per task explaining what the code does. `labpilot answers <id> --file answers.json --json`.
-10. `labpilot export <id> --json`, then tell the user: status (COMPLETED or PARTIAL), the Word file, notebook,
-    REVIEW.md paths, the backend, that screenshots are local renderings of the executed notebook, every outstanding
-    blocker, and `labpilot resume <id>` to continue. Ask them to review and understand the work.
+9. Read EVERY output in `notebook/executed.ipynb` yourself, not just pass/fail: a cell can "pass" while
+   printing "No such file" or checking nothing. Fix such cells and re-execute before answering.
+   Write `answers.json` from the ACTUAL outputs: plain explanatory sentences at the student's level that state the
+   observed numbers in words, never variable dumps like `RESULT = True`. Cite `source_cell_ids`. Use
+   `verification: "verified"` only for cells that passed; `not_verified` when data/runtime is unavailable. Report
+   discrepancies with the manual instead of forcing the expected conclusion. Fill tables the manual asks for via
+   `table_cells` (anchors from `document.json` `fill_in_tables`). Add a short `task_summaries` entry per task.
+   `labpilot answers <id> --file answers.json --json`.
+10. `labpilot export <id> --json` (it runs `labpilot evaluate`). Fix every `quality_review` failure: missing
+    sections the introduction promises (add a task with `placement: "end"`), empty tables, log-like answers, error
+    text in outputs. Re-run export until it is COMPLETED or the remaining gap genuinely needs the user.
+11. Independent review: re-read the manual and the rendered pages (`.labpilot/runs/<id>/render/pages/`) as a strict
+    lab engineer would, using [review-rubric.md](references/review-rubric.md). If your host supports sub-agents,
+    give that review to a fresh agent that did not write the solution. Fix what it finds, then export again.
+12. Tell the user: status (COMPLETED or PARTIAL), the Word file, notebook and REVIEW.md paths, where the code ran,
+    that screenshots are renderings of the executed notebook, every outstanding item (e.g. empty name/ID fields), and
+    `labpilot resume <id>` to continue. Ask them to read, understand and personalise the answers, and to follow their
+    course's rules on AI assistance.
 
 If anything is interrupted: `labpilot status <id> --json` and `labpilot resume <id> --json` show the next action.
 

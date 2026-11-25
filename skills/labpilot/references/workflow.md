@@ -37,6 +37,7 @@ Run files live in `<lab>/.labpilot/runs/<run-id>/`. You write three JSON files, 
   - `append`: add to an appendix.
 - Anchors must be copied exactly, including the `#fingerprint`. If the manual changes, its fingerprint no longer matches and LabPilot rejects the anchor rather than writing to the wrong place.
 - Question ids and task ids must be unique. `depends_on` may only point to earlier tasks.
+- `placement: "end"` adds a closing section after the last task, for example a cluster teardown that the introduction promises. `appendix_title` names the appendix that holds setup or unplaced work.
 - Every inspected task part must appear in the plan. If a part really doesn't apply, pass `--allow-uncovered` and explain why in `notes`.
 
 ## cells.json
@@ -62,6 +63,7 @@ Rules for cell code:
 - Prove numeric claims with `assert` (use a tolerance for floats). Example: `assert abs(matched + unmatched - total) < 1e-6`.
 - Keep the manual's `!pip install` / `!apt-get` lines in the first setup cell; they run inside Colab. Print library versions there.
 - Keep the starter code from the manual. Fill in only what is missing. Write at the course's level.
+- Check cells should print readable sentences ("Both runs gave the same totals.") rather than `KEY = value` lines. End a cell with `_ = helper(...)` when the last call returns a status code, so that no stray `Out[ ]: 0` appears in the screenshot.
 - Cells execute in order in one kernel. Every `execute` starts a fresh kernel and replays from the first cell, so do not rely on state from an earlier attempt.
 
 ## Repair loop
@@ -102,6 +104,8 @@ Rebuild with `build-notebook`. Changed cells become `pending`, and every later c
 }
 ```
 
+- Write answers as plain explanatory sentences that state the observed numbers. Never paste variable dumps or log lines.
+- `table_cells`: values the manual asks you to copy into its tables, as `{"anchor": "<from document.json fill_in_tables>", "text": "28", "source_cell_ids": ["..."]}`.
 - `verified`: every cited cell passed in the current attempt.
 - `conceptual`: only for questions of `kind: conceptual`.
 - `not_verified`: the data or runtime was unavailable. The text should say what is missing.
