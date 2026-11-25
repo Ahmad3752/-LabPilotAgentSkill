@@ -68,6 +68,10 @@ Progress lines go to stderr. Work from the lab folder (or pass `--lab-dir`).
     `labpilot resume <id>` to continue. Ask them to read, understand and personalise the answers, and to follow their
     course's rules on AI assistance.
 
+13. Once the lab is COMPLETED and the review is done, run `labpilot clean <id> --json`. It deletes the temporary
+    workspace and keeps the Completed .docx, the .ipynb, the screenshots and the reports. Never clean a PARTIAL run:
+    it needs its workspace to resume.
+
 If anything is interrupted: `labpilot status <id> --json` and `labpilot resume <id> --json` show the next action.
 
 ## References
