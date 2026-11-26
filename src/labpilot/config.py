@@ -36,7 +36,7 @@ def config_path() -> Path:
 DEFAULT_CONFIG: dict[str, Any] = {
     "backend": "auto",  # auto | local | colab-cli | colab-mcp
     "agents": [],
-    "colab_cli": {"wsl_distro": None, "command": None},
+    "colab_cli": {"command": None},
     "aliases": {},  # expected dataset name -> actual file name
     "telemetry": False,
     "registered_mcp": [],  # MCP registrations LabPilot made (for clean uninstall)

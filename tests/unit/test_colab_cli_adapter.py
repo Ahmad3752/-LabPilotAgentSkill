@@ -6,7 +6,6 @@ tests/integration/test_colab_cloud_smoke.py.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +15,7 @@ from nbformat.v4 import new_output
 
 from labpilot.adapters import colab_cli
 from labpilot.adapters.base import CellRequest, RunContext, RuntimeHandle
-from labpilot.adapters.colab_cli import ColabCliBackend, to_wsl_path
+from labpilot.adapters.colab_cli import ColabCliBackend
 from labpilot.config import load_profile
 from labpilot.errors import ErrorCode, LabPilotError
 from labpilot.models import RunManifest
@@ -58,19 +57,13 @@ def _backend(monkeypatch: pytest.MonkeyPatch, fake: FakeColab) -> ColabCliBacken
     return ColabCliBackend(command=["colab"])
 
 
-def test_native_windows_without_wsl_is_unsupported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys, "platform", "win32")
+def test_missing_cli_fails_preflight_with_install_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(colab_cli, "load_config", lambda: {})
+    monkeypatch.setattr(colab_cli.shutil, "which", lambda _name: None)
     be = ColabCliBackend()
-    assert be.base == [] and not be.capabilities().platform_supported
+    assert be.base == []
     res = be.preflight(_run(tmp_path), load_profile("python"))
-    assert not res.ok and res.checks[0].name == "platform" and "Linux/macOS" in res.checks[0].detail
-
-
-def test_wsl_command_and_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys, "platform", "win32")
-    be = ColabCliBackend(wsl_distro="Ubuntu")
-    assert be.base == ["wsl", "-d", "Ubuntu", "--", "colab"] and be.uses_wsl
-    assert to_wsl_path(Path("C:/Users/x/lab/a b.csv")) == "/mnt/c/Users/x/lab/a b.csv"
+    assert not res.ok and res.checks[0].name == "colab_cli" and "--install-colab-cli" in res.checks[0].fix
 
 
 def test_preflight_detects_missing_auth_and_consent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

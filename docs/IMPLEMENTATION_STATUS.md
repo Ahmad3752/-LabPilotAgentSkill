@@ -33,7 +33,6 @@ This phase targets **Google Colab labs only**. Docker, local Spark/Java runtimes
 | Capability | What is missing |
 |---|---|
 | Colab MCP (browser) bridge | The protocol is tested: host actions, then strict validation and ingest of host-reported outputs. It has not been tried with the real `colab-mcp` server, which needs registration in Claude Code and a connected Colab tab. Codex is not a documented colab-mcp client. |
-| Colab CLI through WSL | Code paths exist (`--wsl-distro`). Untested, because native Windows works. |
 | Codex skill discovery and the one-prompt flow | The skill is installed in `.agents/skills/labpilot`. A real Codex session in VS Code has not yet been run on a lab. |
 | Claude Code skill discovery | Installed to `.claude/skills/labpilot`. Not exercised in a separate session. |
 | macOS / Linux install scripts | Written (`scripts/install.sh`). Not run on a real Mac or Linux machine. |
@@ -49,4 +48,4 @@ This phase targets **Google Colab labs only**. Docker, local Spark/Java runtimes
 
 ## Out of scope in this phase
 
-LMS submission and any LMS write, WhatsApp or other messaging, scheduled jobs (including background new-lab polling), Docker and local Spark/Java profiles, native Colab UI capture.
+Running the Colab CLI through WSL (removed 2026-11-26: native Windows works, so the untested WSL path was deleted), LMS submission and any LMS write, WhatsApp or other messaging, scheduled jobs (including background new-lab polling), Docker and local Spark/Java profiles, native Colab UI capture.

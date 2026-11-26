@@ -118,23 +118,12 @@ def _kernel() -> dict[str, Any]:
         return {"available": False, "error": str(exc)[:200], "fix": f"{sys.executable} -m pip install ipykernel"}
 
 
-def _wsl() -> dict[str, Any]:
-    if sys.platform != "win32":
-        return {"applicable": False}
-    res = run_cmd(["wsl", "-l", "-q"], timeout=30)
-    distros = [d.replace("\x00", "").strip() for d in res.stdout.splitlines()]
-    return {"available": res.ok, "distros": [d for d in distros if d]}
-
-
 def _colab_cli() -> dict[str, Any]:
     be = ColabCliBackend()
     caps = be.capabilities()
     info: dict[str, Any] = {"platform_supported": caps.platform_supported, "configured": bool(be.base)}
-    if sys.platform == "win32" and not be.base:
-        info["detail"] = "google-colab-cli supports Linux/macOS only; configure a WSL distro to use it on Windows"
-        return info
     if not be.base:
-        info["detail"] = "colab CLI not found (uv tool install google-colab-cli)"
+        info["detail"] = "colab CLI not found (labpilot setup --backend colab-cli --install-colab-cli)"
         return info
     ver = be._colab("version", timeout=120)
     info["version"] = strip_ansi(ver.stdout or ver.stderr).strip()[-120:] if ver.returncode != 127 else None
@@ -169,7 +158,6 @@ def doctor(project_dir: Path | None = None) -> dict[str, Any]:
         "skills": skills,
         "browser": _browser(),
         "local_kernel": _kernel(),
-        "wsl": _wsl(),
         "colab_cli": _colab_cli(),
         "colab_mcp": mcp_registration(),
         "nuts_lms": nuts_lms(),

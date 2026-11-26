@@ -149,7 +149,6 @@ def setup(
     backend: str = typer.Option("auto", help="auto, local, colab-cli or colab-mcp"),
     scope: str = typer.Option("project", help="project (this folder only) or user (all projects; explicit opt-in)"),
     project_dir: Path = typer.Option(Path.cwd, "--project-dir"),  # noqa: B008
-    wsl_distro: str = typer.Option(None, help="WSL distro with google-colab-cli installed (Windows colab-cli mode)"),
     register_mcp: bool = typer.Option(False, help="Register the official colab-mcp server with Claude Code"),
     install_colab_cli: bool = typer.Option(False, help="Install the official google-colab-cli into a "
                                            "LabPilot-owned environment (explicit opt-in)"),
@@ -174,8 +173,6 @@ def setup(
         cfg["backend"] = backend
         cfg["agents"] = sorted(set(cfg.get("agents", [])) | ({"codex", "claude"} if agent == "both" else {agent}))
         cfg["installed_skills"] = sorted(set(cfg.get("installed_skills", [])) | {i["path"] for i in installed})
-        if wsl_distro:
-            cfg["colab_cli"]["wsl_distro"] = wsl_distro
         mcp = None
         if register_mcp:
             mcp = [register_colab_mcp(a) for a in (["codex", "claude"] if agent == "both" else [agent])]
@@ -185,11 +182,11 @@ def setup(
         path = save_config(cfg)
         notes = ["Restart your agent (or reload its skills) so it discovers the LabPilot skill.",
                  "Then ask: Use LabPilot to work through the lab in this folder ..."]
-        if backend in ("colab-cli", "auto") and not cfg["colab_cli"].get("command") and not wsl_distro:
+        if backend in ("colab-cli", "auto") and not cfg["colab_cli"].get("command"):
             notes.append("Google Colab CLI not configured yet: rerun with --install-colab-cli, then `labpilot colab-login`.")
         if colab and colab.get("native_windows"):
             notes.append("Upstream google-colab-cli lists Linux/macOS only; LabPilot runs it natively on Windows "
-                         "(verified on Windows 11 with CLI 0.8.0). If it misbehaves, report it and use WSL.")
+                         "(verified on Windows 11 with CLI 0.8.0). If it misbehaves, report it and use --backend local.")
         if colab:
             notes.append(colab["next"])
         if backend == "colab-mcp" and not register_mcp:

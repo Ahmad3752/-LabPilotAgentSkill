@@ -10,7 +10,6 @@ Verified upstream behaviour this adapter relies on:
     decides success from the output objects, never from the exit code.
   * `colab stop -s NAME` releases the runtime.
   * Upstream lists Linux and macOS; 0.8.0 was also verified natively on Windows 11.
-    A WSL mode (`--wsl-distro`) exists but is unverified.
   * Authentication is the CLI's own OAuth (paste-code) or ADC flow; LabPilot never
     sees credentials. Non-interactive calls get stdin=/dev/null, so a missing
     login surfaces as WAITING_FOR_AUTH instead of a hang.
@@ -22,9 +21,8 @@ import hashlib
 import json
 import re
 import shutil
-import sys
 import uuid
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Any, Literal
 
 import nbformat
@@ -56,32 +54,17 @@ QUOTA_HINTS = re.compile(r"(quota|resource exhausted|429|usage limit|no backend|
 LOST_HINTS = re.compile(r"(appears to be lost|session .* not found|connection (refused|closed|reset)|websocket)", re.I)
 
 
-def to_wsl_path(path: Path) -> str:
-    p = PureWindowsPath(str(path.resolve()))
-    drive = p.drive.rstrip(":").lower()
-    return f"/mnt/{drive}/" + "/".join(p.parts[1:])
-
-
 class ColabCliBackend:
     name = "colab-cli"
 
-    def __init__(self, command: list[str] | None = None, wsl_distro: str | None = None) -> None:
-        cfg = load_config().get("colab_cli", {})
-        self.wsl_distro = wsl_distro or cfg.get("wsl_distro")
-        configured = command or cfg.get("command")
-        self.explicit_command = bool(configured)
-        if configured:
-            self.base = list(configured)
-        elif sys.platform == "win32":
-            self.base = ["wsl", "-d", self.wsl_distro, "--", "colab"] if self.wsl_distro else []
-        else:
-            exe = shutil.which("colab")
-            self.base = [exe] if exe else []
-        self.uses_wsl = bool(self.base[:1] == ["wsl"])
+    def __init__(self, command: list[str] | None = None) -> None:
+        configured = command or load_config().get("colab_cli", {}).get("command")
+        exe = shutil.which("colab")
+        self.base = list(configured) if configured else ([exe] if exe else [])
 
     # ------------------------------------------------------------ helpers
     def _path(self, local: Path) -> str:
-        return to_wsl_path(local) if self.uses_wsl else str(local.resolve())
+        return str(local.resolve())
 
     def _colab(self, *args: str, timeout: float = 600) -> CmdResult:
         if not self.base:
@@ -101,7 +84,6 @@ class ColabCliBackend:
         return ErrorCode.RUNTIME_DISCONNECTED
 
     def capabilities(self) -> BackendCapabilities:
-        supported = sys.platform != "win32" or bool(self.wsl_distro) or self.explicit_command
         return BackendCapabilities(
             persistent_kernel=True,
             rich_output=True,
@@ -110,22 +92,15 @@ class ColabCliBackend:
             resume_without_replay=True,  # session kernels persist between exec calls (verified by marker probe)
             host_mediated=False,
             network_isolated=False,
-            platform_supported=supported,
+            platform_supported=True,  # Linux/macOS upstream; native Windows verified with 0.8.0
         )
 
     # ------------------------------------------------------------ preflight
     def preflight(self, run: Run, profile: RuntimeProfile) -> PreflightResult:
         checks: list[Check] = []
-        if sys.platform == "win32" and not self.wsl_distro and not self.explicit_command:
-            checks.append(
-                Check("platform", False, "google-colab-cli supports Linux/macOS only; native Windows is unsupported upstream.",
-                      fix="Configure a WSL distro with the CLI installed and authenticated "
-                          "(labpilot setup --backend colab-cli --wsl-distro Ubuntu), or use --backend local / colab-mcp.")
-            )
-            return PreflightResult(self.name, False, checks)
         ver = self._colab("version", timeout=120)
         checks.append(Check("colab_cli", ver.ok, strip_ansi(ver.stdout.strip() or ver.stderr.strip())[-200:],
-                            fix="Install: uv tool install google-colab-cli (Python >= 3.12)."))
+                            fix="Install: labpilot setup --backend colab-cli --install-colab-cli (needs Python >= 3.12)."))
         if not ver.ok:
             return PreflightResult(self.name, False, checks)
         sessions = self._colab("sessions", timeout=120)
