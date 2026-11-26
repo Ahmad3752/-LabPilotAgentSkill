@@ -9,8 +9,8 @@ Verified upstream behaviour this adapter relies on:
     execute_result / error). It exits 0 even when a cell raises, so LabPilot
     decides success from the output objects, never from the exit code.
   * `colab stop -s NAME` releases the runtime.
-  * The CLI supports Linux and macOS only. On Windows LabPilot uses it only
-    through an explicitly configured WSL distribution.
+  * Upstream lists Linux and macOS; 0.8.0 was also verified natively on Windows 11.
+    A WSL mode (`--wsl-distro`) exists but is unverified.
   * Authentication is the CLI's own OAuth (paste-code) or ADC flow; LabPilot never
     sees credentials. Non-interactive calls get stdin=/dev/null, so a missing
     login surfaces as WAITING_FOR_AUTH instead of a hang.
