@@ -7,7 +7,7 @@ import pytest
 from docx.shared import Pt
 
 from labpilot.documents.anchors import element_text, fingerprint, resolve
-from labpilot.documents.inspect import colab_features, inspect_docx
+from labpilot.documents.inspect import colab_features, colab_fit, inspect_docx
 from labpilot.errors import LabPilotError
 from labpilot.workspace import sha256_file
 
@@ -72,3 +72,23 @@ def test_colab_specific_starter_code_is_flagged(python_lab: Path, tmp_path: Path
     q = tmp_path / "drive.docx"
     d.save(str(q))
     assert "drive-mount" in {f["feature"] for f in colab_features(inspect_docx(q, sha256_file(q)))}
+
+
+@pytest.mark.parametrize(("text", "ok", "blocker"), [
+    # written for Colab: an incidental mention (a Hadoop lab skipping the "AWS bundle") does not block it
+    ("Open Google Colab. !wget hadoop.tar.gz; skip the unused AWS bundle; cd /content/hadoop", True, None),
+    ("Start Kafka with docker run, open tmux terminals A to D on Killercoda", False, "Docker containers"),
+    ("Lab 5: VPC Networking, EC2, and S3 on AWS. Connect with ssh.", False, "a cloud provider console (AWS, Azure or GCP)"),
+    ("Write public static void main in Eclipse and compile with javac", False, "Java programs"),
+    ("Use Python.\nimport pandas as pd\nfrom math import sqrt", True, None),  # Python lab, Colab not named
+    ("Draw an ER diagram for the library database.", False, None),  # not a Python notebook lab
+])
+def test_colab_fit(text: str, ok: bool, blocker: str | None) -> None:
+    fit = colab_fit(text)
+    assert fit["colab_ok"] is ok and (blocker is None or blocker in fit["blockers"])
+
+
+def test_sample_lab_is_colab_ok(python_lab: Path) -> None:
+    manual = next(python_lab.glob("*.docx"))
+    text = "\n".join(b.text for b in inspect_docx(manual, sha256_file(manual)).blocks)
+    assert colab_fit(text)["colab_ok"] is True

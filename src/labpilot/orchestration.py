@@ -20,7 +20,7 @@ from labpilot.adapters.local import LocalBackend
 from labpilot.config import RuntimeProfile, load_config, load_profile
 from labpilot.datasets.validate import dataset_blockers, resolve_datasets, stage_local
 from labpilot.documents.anchors import resolve
-from labpilot.documents.inspect import colab_features, draft_plan, inspect_docx
+from labpilot.documents.inspect import colab_features, colab_fit, draft_plan, inspect_docx
 from labpilot.errors import RETRYABLE, ErrorCode, ExitCode, LabPilotError, classify_execution_error
 from labpilot.evidence.capture import capture_notebook
 from labpilot.evidence.manifest import load_evidence, save_evidence
@@ -214,6 +214,7 @@ def inspect_run(run: Run, aliases: dict[str, str] | None = None) -> dict[str, An
         stored.update(aliases)
     insp = inspect_docx(_source_copy(run), m.source_sha256, run.doc_images_dir)
     colab = colab_features(insp)
+    fit = colab_fit("\n".join(b.text for b in insp.blocks))
     plan_path = run.path("plan.json")
     if plan_path.exists():
         required = Plan.model_validate(read_json(plan_path)).required_files
@@ -233,6 +234,7 @@ def inspect_run(run: Run, aliases: dict[str, str] | None = None) -> dict[str, An
     m.profile = "python"
     doc = insp.to_dict()
     doc["colab_features"] = colab
+    doc["colab_fit"] = fit
     atomic_write_json(run.path("document.json"), doc)
     draft = draft_plan(insp, [r.model_dump() for r in required])
     atomic_write_json(run.path("draft_plan.json"), draft)
@@ -245,6 +247,7 @@ def inspect_run(run: Run, aliases: dict[str, str] | None = None) -> dict[str, An
         "run_id": run.id,
         "lab_title_candidates": insp.title_candidates,
         "environment": insp.environment,
+        "colab_fit": fit,
         "colab_features": colab,
         "requires_native_colab_evidence": insp.requires_native_colab_evidence,
         "tasks": [{"id": t["id"], "title": t["title"], "parts": [p["id"] for p in t["parts"]],

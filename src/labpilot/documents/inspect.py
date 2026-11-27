@@ -572,6 +572,38 @@ COLAB_FEATURES = [
 ]
 
 
+COLAB_SIGNAL = re.compile(r"\bcolab\b|google\.colab|/content/", re.I)
+PYTHON_SIGNAL = re.compile(r"\bpython\b|^\s*(?:import|from)\s+\w+|\bpandas\b|pyspark|\.ipynb\b|jupyter", re.I | re.M)
+COLAB_BLOCKERS = [
+    (re.compile(r"\bdocker\b", re.I), "Docker containers"),
+    (re.compile(r"\btmux\b|\bterminals?\s+[A-D]\b", re.I), "several live terminal sessions (tmux)"),
+    (re.compile(r"killercoda|katacoda|play-with-docker", re.I), "a browser Linux playground such as Killercoda"),
+    (re.compile(r"\baws\b|\bec2\b|amazon web services|\bazure\b|google cloud console", re.I),
+     "a cloud provider console (AWS, Azure or GCP)"),
+    (re.compile(r"public\s+static\s+void\s+main|\bjavac\b", re.I), "Java programs"),
+    (re.compile(r"\beclipse\b|intellij|netbeans|android studio", re.I), "a desktop IDE"),
+    (re.compile(r"virtualbox|vmware|\bssh\b", re.I), "a virtual machine or SSH access"),
+]
+
+
+def colab_fit(text: str) -> dict[str, Any]:
+    """Can this lab be done in Google Colab? Deterministic first answer; the agent confirms it from the manual.
+
+    A manual written for Colab wins over incidental mentions (a Hadoop lab that skips an "AWS bundle").
+    """
+    blockers = [label for pattern, label in COLAB_BLOCKERS if pattern.search(text)]
+    if COLAB_SIGNAL.search(text):
+        ok, reason = True, "The manual is written for Google Colab."
+    elif blockers:
+        needs = blockers[0] if len(blockers) == 1 else ", ".join(blockers[:-1]) + " and " + blockers[-1]
+        ok, reason = False, f"It needs {needs}, which Google Colab cannot provide."
+    elif len(PYTHON_SIGNAL.findall(text)) >= 3:
+        ok, reason = True, "A Python lab: it runs in Google Colab even though the manual does not name it."
+    else:
+        ok, reason = False, "It is not a Python notebook lab, so it cannot be done in Google Colab."
+    return {"colab_ok": ok, "reason": reason, "blockers": blockers}
+
+
 def colab_features(insp: Inspection) -> list[dict[str, Any]]:
     """Colab-specific constructs in the manual's starter code that the agent must adapt."""
     found = []

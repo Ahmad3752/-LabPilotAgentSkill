@@ -66,6 +66,7 @@ This runs a synthetic sample lab through the real CLI with known agent files.
 
 | Feature | Status |
 |---|---|
+| Checking first whether a lab can be done in Colab, and saying why not (e.g. AWS, Docker or terminal labs) | Verified on 11 real manuals |
 | Reading `.docx` manuals (tasks, "Question N", answer boxes, fill-in tables, starter code, images) | Verified |
 | Google Colab via `google-colab-cli` 0.8.0, native Windows | Verified on real Colab |
 | Local Jupyter fallback | Verified |

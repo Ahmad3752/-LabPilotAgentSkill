@@ -257,6 +257,24 @@ def init(
     _run(do, json_out)
 
 
+@app.command("colab-check")
+def colab_check(file: Path, json_out: bool = JSON_OPT) -> None:
+    """Decide whether a lab manual can be done in Google Colab: a .docx, a saved `read_document` result (.json), or text."""
+    from labpilot.documents.inspect import colab_fit, inspect_docx
+    from labpilot.lms import load_tool_json
+
+    def do() -> dict[str, Any]:
+        if file.suffix.lower() == ".docx":
+            text = "\n".join(b.text for b in inspect_docx(file, "").blocks)
+        elif file.suffix.lower() == ".json":
+            text = str(load_tool_json(file, "read_document").get("text", ""))
+        else:
+            text = file.read_text(encoding="utf-8-sig")
+        return {"file": file.name, **colab_fit(text)}
+
+    _run(do, json_out, lambda r: f"{'Colab: yes' if r['colab_ok'] else 'Colab: NO'} - {r['reason']}")
+
+
 @app.command()
 def inspect(run_id: str, alias: list[str] = typer.Option(None, "--alias", help="EXPECTED=ACTUAL dataset mapping"),  # noqa: B008
             lab_dir: Path = LAB_DIR_OPT, json_out: bool = JSON_OPT) -> None:

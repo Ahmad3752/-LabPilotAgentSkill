@@ -39,17 +39,23 @@ folder, then pass the file to LabPilot. Never edit, merge or invent tool output.
    - `--match REGEX` if the course names labs differently, e.g. `"practical|experiment"`.
      `--include-past` also lists labs whose deadline has passed.
    - `in_progress` lists labs already downloaded but not finished. Offer to resume them.
-4. Tell the user which new labs there are (course, name, due date, overdue / not open yet).
-   Ask which ones to fetch. Stop here if they only asked whether there is a new lab.
-5. For a chosen lab, find its files:
+4. **Colab check** for each new lab, before asking anything: find its manual (*Finding a lab's files* below), call
+   `read_document(fileurl)`, save the result as `.labpilot/lms/manual-<assignid>.json`, then
+   `labpilot colab-check .labpilot/lms/manual-<assignid>.json --json`.
+5. Tell the user which new labs there are (course, name, due date, overdue / not open yet) with the verdict.
+   A lab with `colab_ok: false`: say "<lab> cannot be done in Google Colab: <reason>" and do not offer it.
+   For each Colab lab ask: "I found <lab>. Should I do it for you?" Always ask; fetch only what the user
+   confirms. Stop here if they only asked whether there is a new lab.
+   Finding a lab's files:
    - **Attached to the assignment** (most common): `call_api` with `wsfunction`
      `mod_assign_get_assignments` and `params_json` `{"courseids": [<courseid>]}`. Use the assignment's
      `introattachments` (`filename`, `fileurl`).
    - **Posted as course material**: `course_contents(courseid)` or `find_files(name=..., courseid=...)`.
      Look for files in the same section or with the same lab number. If more than one manual could
      match, ask the user instead of guessing.
-6. `download_file(fileurl, dest=<suggested_folder>, filename=<filename>)` for the manual and each data
-   file. Use the absolute path of `suggested_folder`, and create the folder first.
+6. `download_file(fileurl, dest="<absolute suggested_folder>\<filename>")` for the manual and each data
+   file. Pass the full file path as `dest`: when `dest` is a folder that does not exist yet, the tool writes the
+   file under the folder's name instead.
 7. `labpilot lms stage "<suggested_folder>" --assignments .labpilot/lms/assignments.json --assign-id <id>
    --source-url <fileurl> ... --json`. This writes `lms_source.json` (provenance and sha256 of each file)
    and marks the lab in progress.

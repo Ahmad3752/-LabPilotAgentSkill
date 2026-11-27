@@ -194,3 +194,13 @@ def test_doctor_nuts_lms(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
         "command": "moodle-mcp", "args": ["serve"], "env": {"OPENSSL_CONF": "x.cnf"}}}}))
     r = doctor.nuts_lms()
     assert r["tls_workaround"] is True and r["fix"] is None
+
+
+def test_colab_check_reads_saved_read_document_result(tmp_path: Path) -> None:
+    # shaped like the Nuts MCP `read_document` result, saved unchanged by the agent
+    f = tmp_path / "manual-5018.json"
+    f.write_text(json.dumps({"filename": "Lab 11.docx", "chars": 60, "truncated": False,
+                             "text": "Run Kafka with docker on Killercoda, then open tmux terminals A to D."}))
+    res = CliRunner().invoke(app, ["colab-check", str(f), "--json"])
+    out = json.loads(res.stdout)
+    assert res.exit_code == 0 and out["colab_ok"] is False and "Docker containers" in out["blockers"]

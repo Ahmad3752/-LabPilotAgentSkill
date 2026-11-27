@@ -25,13 +25,18 @@ Progress lines go to stderr. Work from the lab folder (or pass `--lab-dir`).
 
 ## New labs from the LMS
 If the user asks whether there is a new lab, or to get a lab from the LMS, follow [lms.md](references/lms.md):
-`list_assignments` (Nuts LMS MCP) → `labpilot lms check` → ask which labs to fetch → `download_file` →
+`list_assignments` (Nuts LMS MCP) → `labpilot lms check` → `labpilot colab-check` on each new lab's manual →
+ask "I found <lab>; should I do it for you?" (Colab labs only) → `download_file` →
 `labpilot lms stage` → the workflow below → `labpilot lms mark --state processed`. Read-only: never submit,
 never handle the LMS password.
 
 ## Workflow
 1. `labpilot doctor --json` if anything looks unconfigured. Then
    `labpilot init --lab "<manual>.docx" --json` and note `run_id`.
+   **Colab check first:** read `inspection.colab_fit`. If `colab_ok` is false, tell the user
+   "<lab> cannot be done in Google Colab: <reason>" and stop. Confirm the verdict from the manual yourself: a lab
+   written for Colab, or plain Python notebook code, is a Colab lab; Java programs, AWS or other cloud consoles,
+   Docker or several live terminals are not.
 2. Read `.labpilot/runs/<id>/document.json` and `draft_plan.json`. Look at extracted images in
    `document_images/` when the text is not enough. If a task exists only in an unreadable figure, flag it; do not invent it.
 3. Write `plan.json` (start from the draft): every task part, every observation question with an id and
