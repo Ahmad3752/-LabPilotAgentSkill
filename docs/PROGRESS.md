@@ -28,7 +28,7 @@ Last updated: 2026-11-27.
 
 ## Next steps (in order; proposed unless marked agreed)
 
-1. The user's real-world test (agreed): a fresh Codex or Claude Code session started in `C:abs` runs the lms flow from the readme ("any new labs?" → "do lab 1"); lab 1 is a closed colab lab, fine for testing. That verifies the one-prompt flow, Codex, LMS downloads and `lms stage`. Codex needs `moodle` registered in its own config with `OPENSSL_CONF` to see the LMS.
+1. The user's real-world test (agreed): a fresh Codex or Claude Code session started in `C:\Labs` runs the LMS flow from the README ("any new labs?" → "do Lab 1"); Lab 1 is a closed Colab lab, fine for testing. That verifies the one-prompt flow, Codex, LMS downloads and `lms stage`. Codex needs `moodle` registered in its own config with `OPENSSL_CONF` to see the LMS.
 2. Grilling questions still open: is v1 done when a classmate on Windows gets a Completed lab from one prompt in Claude Code? Is the audience the user plus classmates via GitHub?
 3. Check that the skill is discovered in a fresh Claude Code session (still unverified; any new session can check it).
 
