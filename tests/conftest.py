@@ -28,6 +28,7 @@ def isolated_config(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytes
     cfg = tmp_path_factory.mktemp("labpilot-config")
     monkeypatch.setenv("LABPILOT_CONFIG_DIR", str(cfg))
     monkeypatch.setenv("LABPILOT_PROGRESS", "0")
+    monkeypatch.setenv("LABPILOT_ALLOW_LOCAL", "1")  # lab code runs on Colab; the local kernel is for tests only
     return cfg
 
 

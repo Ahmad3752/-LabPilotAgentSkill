@@ -90,8 +90,8 @@ NEXT_ACTIONS: dict[ErrorCode, str] = {
     ErrorCode.TIMEOUT: "The cell exceeded its time limit; simplify it or raise --timeout.",
     ErrorCode.SECURITY_DENIED: "Rewrite the cell without the denied operation, or have the user approve it.",
     ErrorCode.RUNTIME_DISCONNECTED: "Resume the run; LabPilot recreates the runtime and replays verified cells.",
-    ErrorCode.AUTH_REQUIRED: "Sign in using the official flow for the backend, then resume.",
-    ErrorCode.QUOTA_EXHAUSTED: "Stop using this cloud backend; resume with --backend local if allowed.",
+    ErrorCode.AUTH_REQUIRED: "Run `labpilot colab-login` in your own terminal, then run the command again.",
+    ErrorCode.QUOTA_EXHAUSTED: "Colab has no resources for this account right now; wait, then `labpilot finish`.",
 }
 
 

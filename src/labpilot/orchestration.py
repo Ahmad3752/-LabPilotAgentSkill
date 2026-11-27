@@ -411,20 +411,27 @@ def make_backend(name: str) -> Any:
     raise LabPilotError(ErrorCode.BACKEND_UNAVAILABLE, f"Unknown backend '{name}'.", exit_code=ExitCode.CONFIG)
 
 
+COLAB_LOGIN = "labpilot colab-login"
+COLAB_INSTALL = "labpilot setup --backend colab-cli --install-colab-cli"
+
+
+def _check_backend_allowed(backend: str) -> None:
+    """Lab code runs on Google Colab only; the local kernel exists for LabPilot's own tests and offline demo."""
+    if backend == "local" and os.environ.get("LABPILOT_ALLOW_LOCAL") != "1":
+        raise LabPilotError(ErrorCode.BACKEND_UNAVAILABLE,
+                            "Lab code runs only on Google Colab; the local kernel is reserved for LabPilot's tests "
+                            "and offline demo (LABPILOT_ALLOW_LOCAL=1).", exit_code=ExitCode.CONFIG,
+                            next_action="labpilot preflight <run-id> --backend colab-cli --allow-cloud --allow-upload")
+
+
 def _choose(run: Run, backend: str) -> tuple[str, list[str]]:
-    """Colab first; the local kernel is a clearly labelled fallback."""
+    """`auto` means Google Colab (the CLI, or colab-mcp when the user configured it)."""
     notes: list[str] = []
     if backend == "auto":
-        backend = load_config().get("backend", "auto")
-    if backend == "auto":
-        cli = ColabCliBackend()
-        if cli.base and cli.capabilities().platform_supported and run.manifest.consent.cloud_compute:
-            backend = "colab-cli"
-            notes.append("auto: Google Colab CLI is configured and cloud consent was given")
-        else:
-            backend = "local"
-            notes.append("auto: Google Colab is not configured (or no consent yet), so the local Jupyter fallback is "
-                         "used; the report labels this. Run `labpilot setup --backend colab-cli` to use Colab.")
+        configured = load_config().get("backend", "auto")
+        backend = configured if configured in ("colab-cli", "colab-mcp") else "colab-cli"
+        notes.append(f"auto: lab code runs on Google Colab ({backend})")
+    _check_backend_allowed(backend)
     return backend, notes
 
 
@@ -445,6 +452,18 @@ def preflight(run: Run, backend: str = "auto", allow_cloud: bool = False, allow_
     result = be.preflight(run, profile)
     changes = check_inputs(run)
     m.backend = chosen
+    if chosen == "colab-cli":
+        failed = {c.name for c in result.checks if not c.ok}
+        if "colab_cli" in failed:
+            run.save()
+            raise LabPilotError(ErrorCode.BACKEND_UNAVAILABLE, "The Google Colab CLI is not installed or configured.",
+                                exit_code=ExitCode.CONFIG, next_action=COLAB_INSTALL)
+        if "colab_auth" in failed:
+            run.save()
+            run.set_state(RunState.WAITING_FOR_AUTH, "Colab sign-in required")
+            raise LabPilotError(ErrorCode.AUTH_REQUIRED, "You are not signed in to Google Colab.",
+                                exit_code=ExitCode.CONFIG,
+                                next_action=f"Run `{COLAB_LOGIN}` in your own terminal, then run the command again.")
     staged: list[str] = []
     if result.ok and not changes:
         stage_local(run.lab_dir, run.data_dir, m.datasets)
@@ -503,6 +522,7 @@ def assemble_executed(run: Run, records: list[CellExecution], target: Path) -> P
 def apply_records(run: Run, plan: Plan, attempt_id: str, records: list[CellExecution], executed_nb: Path | None,
                   backend_label: str, requested: list[str], skipped: list[str]) -> dict[str, Any]:
     m = run.manifest
+    m.backend_state.pop("executing_attempt", None)
     attempt_dir = run.exec_dir / attempt_id
     attempt_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_json(attempt_dir / "records.json", [r.model_dump(mode="json") for r in records])
@@ -554,7 +574,8 @@ def execute(run: Run, cell: str | None = None, timeout: int | None = None, retry
     if not run.source_notebook.exists():
         raise LabPilotError(ErrorCode.INVALID_STATE, "Build the notebook first (`labpilot build-notebook`).")
     if backend_override:
-        m.backend = backend_override
+        m.backend = _choose(run, backend_override)[0]
+    _check_backend_allowed(m.backend or "")
     if m.backend in ("colab-cli", "colab-mcp"):
         needs_upload = any(d.status in ("found", "mapped") for d in m.datasets)
         if not m.consent.cloud_compute or (needs_upload and not m.consent.upload_datasets):
@@ -606,6 +627,7 @@ def execute(run: Run, cell: str | None = None, timeout: int | None = None, retry
     run.path("cancel.requested").unlink(missing_ok=True)  # a new explicit execute supersedes an old cancel
     ctx = RunContext(run=run, profile=profile, attempt_id=attempt_id, timeout_s=timeout or profile.cell_timeout_s,
                      datasets=m.datasets)
+    m.backend_state["executing_attempt"] = attempt_id  # cleared by apply_records; left behind only by a crash
     run.set_state(RunState.EXECUTING, f"attempt {attempt_id} on {getattr(be, 'label', be.name)}")
 
     def on_event(ev: dict[str, Any]) -> None:
@@ -657,10 +679,14 @@ def execute(run: Run, cell: str | None = None, timeout: int | None = None, retry
     quota = [r for r in records if r.error_code == str(ErrorCode.QUOTA_EXHAUSTED)]
     if quota:
         _set_blockers(run, "QUOTA", [Blocker(code="QUOTA_EXHAUSTED", message="Colab quota/resources unavailable.",
-                                             next_action="Resume with `--backend local` if the user allows local execution.",
+                                             next_action="Wait until Colab has resources again, then `labpilot finish <run-id>`.",
                                              requires_user=True)])
         run.save()
     summary["status"] = "FAILED_CELLS" if summary["failed"] else ("PARTIAL" if summary["blocked"] else "OK")
+    if m.backend_state.get("release_pending"):
+        summary["runtime_release"] = {
+            "confirmed": False, "sessions": m.backend_state["release_pending"],
+            "detail": "Release of the Colab runtime was attempted, not confirmed; retry with `labpilot cancel <run-id>`."}
     return summary
 
 

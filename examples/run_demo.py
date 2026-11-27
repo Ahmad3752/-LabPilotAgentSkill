@@ -1,10 +1,12 @@
 """Reproducible end-to-end demo WITHOUT an LLM: drives the real CLI with known agent files.
 
-    python examples/run_demo.py <empty-folder>                       # local fallback kernel
+    python examples/run_demo.py <empty-folder>                       # local kernel (offline demo only)
     python examples/run_demo.py <empty-folder> --backend colab-cli   # real Google Colab (your account)
 
 It generates the SYNTHETIC Colab-style sample lab, then performs exactly the CLI calls
-the skill tells an agent to make. Every output, screenshot and answer comes from real execution.
+the skill tells an agent to make: init, plan, `finish --cells`, answers from the real outputs,
+`finish --answers`. Every output, screenshot and answer comes from real execution.
+Lab code normally runs on Google Colab only; the local mode sets LABPILOT_ALLOW_LOCAL=1 for itself.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -55,20 +58,20 @@ def run(folder: Path, backend: str = "local") -> dict[str, Any]:
     (folder / "plan.json").write_text(json.dumps(agent.make_plan(draft), indent=2), encoding="utf-8")
     cli(folder, "plan", rid, "--file", "plan.json")
     (folder / "cells.json").write_text(json.dumps(agent.CELLS, indent=2), encoding="utf-8")
-    cli(folder, "build-notebook", rid, "--file", "cells.json")
-    pf_args = ["preflight", rid, "--backend", backend]
-    if backend != "local":
-        pf_args += ["--allow-cloud", "--allow-upload"]  # the person running the demo consents explicitly
-    cli(folder, *pf_args)
-    ex = cli(folder, "execute", rid, check=False)
-    if ex.get("status") != "OK":
-        raise SystemExit(f"execution did not pass: {json.dumps(ex, indent=2)[:4000]}")
-    cap = cli(folder, "capture", rid)
+    flags = ["--backend", backend]
+    if backend == "local":
+        os.environ["LABPILOT_ALLOW_LOCAL"] = "1"  # offline demo only; real labs run on Google Colab
+    else:
+        flags += ["--allow-cloud", "--allow-upload"]  # the person running the demo consents explicitly
+    first = cli(folder, "finish", rid, "--cells", "cells.json", *flags, check=False)
+    if first.get("next_action", {}).get("action") != "answers":
+        raise SystemExit(f"finish did not reach the answers step: {json.dumps(first, indent=2)[:4000]}")
+    # the "agent" reads the real executed outputs and writes grounded answers
     answers = agent.make_answers(str(run_dir / "notebook" / "executed.ipynb"))
     (folder / "answers.json").write_text(json.dumps(answers, indent=2), encoding="utf-8")
-    cli(folder, "answers", rid, "--file", "answers.json")
-    exp = cli(folder, "export", rid, check=False)
-    return {"run_id": rid, "capture": cap, "export": exp}
+    final = cli(folder, "finish", rid, "--answers", "answers.json", check=False)
+    exp = {"status": final["verdict"], "output_dir": final["output_dir"], "failed_checks": final["failed_checks"]}
+    return {"run_id": rid, "finish": [first, final], "export": exp}
 
 
 if __name__ == "__main__":

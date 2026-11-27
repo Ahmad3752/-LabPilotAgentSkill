@@ -1,32 +1,32 @@
 # Where the lab code runs
 
-LabPilot targets **Google Colab labs**. Choose the backend in this order:
+LabPilot runs lab code **only on Google Colab**, with the user's own account. There is no local fallback.
 
-1. Use what the user explicitly asked for, and what the manual requires.
-2. Use Google Colab if it is set up and the user consents.
-3. Otherwise use the local fallback, and tell the user you did.
-
-| Backend | Command | When | Notes |
+| Backend | How | When | Notes |
 |---|---|---|---|
-| colab-cli | `preflight --backend colab-cli --allow-cloud --allow-upload` | The official `google-colab-cli` is installed and signed in. | Runs every cell in a real Colab CPU runtime, with the user's account. Never allocate compute or upload files without consent. Never request a GPU unless the lab needs one and the user agrees. |
-| colab-mcp | `execute --backend colab-mcp` (after preflight) | Claude Code with the official colab-mcp server and a Colab tab connected. | Host-mediated: you run the cells through the colab-mcp tools, then `record-execution`. Codex is not a documented colab-mcp client. |
-| local | `preflight --backend local` | Colab is unavailable. | Runs on the user's machine in a plain Jupyter kernel. The report labels it `local-jupyter`. Packages the lab installs with `!pip` must already exist locally. |
+| colab-cli (default) | `labpilot finish <id> --cells cells.json --allow-cloud --allow-upload` | Always, unless the user set up colab-mcp. `--backend auto` means colab-cli. | Runs every cell in a real Colab CPU runtime. Never allocate compute or upload files without the user's consent. Never request a GPU unless the lab needs one and the user agrees. LabPilot stops only the Colab sessions it created. |
+| colab-mcp (experimental) | `labpilot finish <id> --backend colab-mcp ...` | Claude Code with the official colab-mcp server and a Colab tab connected. | Host-mediated: `finish` stops with `record-execution`; you run the cells through the colab-mcp tools, then `labpilot record-execution`, then `finish` again. Codex is not a documented colab-mcp client. |
 
-`--backend auto` picks `colab-cli` only when it is configured and cloud consent was given. Otherwise it picks `local`.
+The local Jupyter kernel exists only for LabPilot's own tests and offline demo. `--backend local` is refused.
 
 ## Colab-specific starter code (see `colab_features` in document.json)
 
 | Starter code | What to do |
 |---|---|
 | `files.upload()` | Do not use it. LabPilot stages the files (it uploads them to `/content` in Colab), so load them by name, e.g. `pd.read_csv('sales.csv')`. |
-| `/content/...` paths | Use plain relative names. Colab's working directory is `/content`, so relative names work there and locally. |
+| `/content/...` paths | Use plain relative names. Colab's working directory is `/content`, so relative names work there. |
 | `!pip install ...` / `!apt-get ...` | Put them in the first setup cell exactly as the manual says. They run inside Colab. |
 | `drive.mount()` | Never mount Drive. Ask the user to place the files in the lab folder. |
 
 ## When to stop and ask the user
 
+`finish` puts the one action needed in `next_action`. When `actor` is `user`, tell the user exactly that.
+
 | Situation | What to tell the user |
 |---|---|
-| Sign-in needed (`WAITING_FOR_AUTH`) | Run the official sign-in once in a terminal. See the error's `next_action`. Never ask for passwords or tokens. |
-| Quota or paid entitlement needed | Explain, and offer the local fallback. Never buy anything. |
+| Not signed in (`AUTH_REQUIRED`) | Run `labpilot colab-login` in your own terminal (Google's sign-in), then run the same command again. Never ask for passwords or tokens. |
+| Colab CLI missing (`BACKEND_UNAVAILABLE`) | Run `labpilot setup --backend colab-cli --install-colab-cli`, then `labpilot colab-login`. |
+| No consent yet (`next_action.action == "consent"`) | Ask whether LabPilot may use their Google Colab and upload the lab files. On yes, rerun with `--allow-cloud --allow-upload`. |
+| Quota or paid entitlement needed (`QUOTA_EXHAUSTED`) | Explain and wait; run `finish` again later. Never buy anything. |
+| `runtime_release` in the summary | LabPilot tried to release the Colab runtime but could not confirm it. `labpilot cancel <id>` retries. |
 | The manual demands screenshots from the Colab web UI | LabPilot produces labelled renderings of the executed notebook, not Colab UI screenshots. Report this as unmet. |
