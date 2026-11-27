@@ -46,7 +46,10 @@ MONO_FONTS = {
     "fira code",
     "jetbrains mono",
 }
-TASK_RE = re.compile(r"^\s*(?:Lab\s+)?(Task|Exercise|Activity|Problem)\s*[#:.\-]?\s*(\d+)\b\s*[:.\-–—]?\s*(.*)$", re.I)
+# "Task 2 – ..." is a task; "Activity 2.1 – ..." (a dotted number) is a child unit of Task 2
+TASK_RE = re.compile(
+    r"^\s*(?:Lab\s+)?(Task|Exercise|Activity|Problem)\s*[#:.\-]?\s*(\d+)(?:\.(\d+))?\b\s*[:.\-–—]?\s*(.*)$", re.I
+)
 PART_RE = re.compile(r"^\s*\(?Part\s+([A-Z])\)?\s*[:.\-–—]?\s*(.*)$", re.I)
 PROMISED_SECTIONS = {
     "teardown": r"\bteardown\b|\btear(ing)? down\b|\bshut ?down\b|\bstop(ping)? (the )?(cluster|hadoop|daemons)\b",
@@ -54,6 +57,9 @@ PROMISED_SECTIONS = {
     "deliverables": r"\bdeliverables?\b",
     "submission": r"\bsubmission\b",
 }
+# an explicit "Q1." / "Q2:" / "Q3)" label makes a question even without a "?" ("Q1. Modify the ..."); "Question 1:"
+# is left out because manuals use it for section titles ("Question 1: Working with HDFS")
+QUESTION_LABEL_RE = re.compile(r"^\s*Q\s*\d+\s*[:.)\-–—]", re.I)
 QUESTION_PART_RE = re.compile(r"^\s*Question\s+(\d+)\s*[:.\-–—]\s*(.*)$", re.I)
 SOLUTION_RE = re.compile(
     r"\b(solution|answer|your code|paste (your )?(code|screenshot|output)|screenshot(s)? here|write your)\b", re.I
@@ -63,10 +69,10 @@ QUESTION_START_RE = re.compile(
     r"^\s*(Q\d*[:.)]|Question\b|Observation|Observe|Explain|Why\b|What\b|Which\b|How\b|Does\b|Do\b|Is\b|Are\b|Can\b|Compare\b|Describe\b|Identify\b)",
     re.I,
 )
-_EXT = r"(?:csv|tsv|json|jsonl|xlsx|xls|parquet|txt|png|jpe?g|xml|zip)"
+_EXT = r"(?:csv|tsv|json|jsonl|xlsx|xls|parquet|txt|png|jpe?g|xml|zip|db|sqlite3?)"
 FILE_RE = re.compile(
     r"[\"'“‘`]([^\"'”’`\n]{1,80}?\." + _EXT + r")[\"'”’`]"  # quoted names may contain spaces
-    r"|(?<![\w\\-])([\w][\w\-.]{0,80}\." + _EXT + r")\b",
+    r"|(?<![\w\\-])([\w][\w\-.]{0,80}\." + _EXT + r")\b(?!\()",  # not a call: spark.read.parquet(...)
     re.I,
 )
 ENV_PATTERNS = {
@@ -110,7 +116,8 @@ class Inspection:
     solution_boxes: list[dict[str, Any]] = field(default_factory=list)
     code_blocks: list[dict[str, Any]] = field(default_factory=list)
     questions: list[dict[str, Any]] = field(default_factory=list)
-    file_references: list[dict[str, Any]] = field(default_factory=list)
+    file_references: list[dict[str, Any]] = field(default_factory=list)  # external inputs the lab needs
+    generated_files: list[dict[str, Any]] = field(default_factory=list)  # files the manual's own code creates
     environment: dict[str, Any] = field(default_factory=dict)
     student_fields: list[dict[str, Any]] = field(default_factory=list)
     images: list[dict[str, Any]] = field(default_factory=list)
@@ -308,7 +315,10 @@ def _analyse(insp: Inspection) -> None:
             entry = seen_files.setdefault(name, {"name": name, "anchors": [], "in_code": False})
             entry["anchors"].append(b.anchor)
             entry["in_code"] = entry["in_code"] or b.is_code
-    insp.file_references = list(seen_files.values())
+    for entry in seen_files.values():
+        entry["role"] = _file_role(entry["name"], full_text)
+    insp.file_references = [f for f in seen_files.values() if f["role"] == "input"]
+    insp.generated_files = [f for f in seen_files.values() if f["role"] == "output"]
     for b in insp.blocks:
         if b.kind in ("paragraph", "cell") and STUDENT_RE.match(b.text) and len(b.text) < 120:
             label = b.text.split(":")[0].strip()
@@ -333,7 +343,7 @@ def _analyse(insp: Inspection) -> None:
             current.clear()
 
     for b in paras:
-        if b.is_code and b.text:
+        if b.is_code and b.text and not QUESTION_LABEL_RE.match(b.text):
             if current and not _adjacent(current[-1].anchor, b.anchor):
                 flush()
             current.append(b)
@@ -343,6 +353,7 @@ def _analyse(insp: Inspection) -> None:
 
     # ---- tasks and parts in reading order
     task: dict[str, Any] | None = None
+    used: set[str] = set()
     for b in paras:
         if b.depth > 1:  # skip text nested inside solution tables
             continue
@@ -352,18 +363,24 @@ def _analyse(insp: Inspection) -> None:
         if tm and is_headingish:
             if re.search(r"\b(solution|answer)s?\b", text, re.I):
                 continue
-            number = tm.group(2)
-            title = tm.group(3).strip() or text.strip()
-            task = {
-                "id": f"T{number}",
-                "number": int(number),
-                "title": title,
-                "source_anchor": f"{b.anchor}#{b.fp}",
-                "parts": [],
-                "questions": [],
-                "instructions": [],
-            }
-            insp.tasks.append(task)
+            word, number, minor, rest = tm.groups()
+            unit: dict[str, Any] = {"title": rest.strip() or text.strip(), "source_anchor": f"{b.anchor}#{b.fp}",
+                                    "questions": [], "instructions": []}
+            if minor is None:
+                task = {"id": _unique_id(f"T{number}", used, text, insp.warnings), "number": int(number), **unit,
+                        "parts": []}
+                insp.tasks.append(task)
+                continue
+            uid = _unique_id(f"T{number}-{word[0].upper()}{minor}", used, text, insp.warnings)
+            if task is None:
+                insp.warnings.append(f"'{normalize(text)[:60]}' comes before any task heading; it was made task {uid}.")
+                task = {"id": uid, "number": int(number), **unit, "parts": []}
+                insp.tasks.append(task)
+                continue
+            if int(number) != task["number"]:
+                insp.warnings.append(f"'{normalize(text)[:60]}' sits under {task['id']} but is numbered for task "
+                                     f"{number}; check the manual's numbering.")
+            task["parts"].append({"id": uid, "kind": word.lower(), "number": f"{number}.{minor}", **unit})
             continue
         pm = PART_RE.match(text)
         qm: re.Match[str] | None = (
@@ -375,7 +392,8 @@ def _analyse(insp: Inspection) -> None:
             rest = unit_match.group(2).strip()
             task["parts"].append(
                 {
-                    "id": f"{task['id']}.{label}",
+                    "id": _unique_id(f"{task['id']}.{label}", used, text, insp.warnings),
+                    "kind": "question" if unit_match is qm else "part",
                     "title": rest or (f"Question {label}" if unit_match is qm else f"Part {label}"),
                     "source_anchor": f"{b.anchor}#{b.fp}",
                     "questions": [],
@@ -383,10 +401,11 @@ def _analyse(insp: Inspection) -> None:
                 }
             )
             continue
-        if task is None or not text or b.is_code:
+        labelled = bool(QUESTION_LABEL_RE.match(text))
+        if task is None or not text or (b.is_code and not labelled):  # a "Q1." label wins over a code font
             continue
         target = task["parts"][-1] if task["parts"] else task
-        if _is_question(text):
+        if labelled or _is_question(text):
             qid = f"{target['id']}.Q{len(target['questions']) + 1}"
             q = {"id": qid, "text": text, "anchor": f"{b.anchor}#{b.fp}", "task_id": target["id"]}
             target["questions"].append(q)
@@ -405,12 +424,14 @@ def _analyse(insp: Inspection) -> None:
         fill = cells[1] if (lm and len(cells) > 1) else label_cell
         task_hint = None
         preceding = [x for x in insp.tasks if _anchor_before(x["source_anchor"].split("#")[0], t.anchor)]
-        if lm and lm.group(1):
-            task_hint = f"T{lm.group(1)}"
+        # "Task 2 Solution", or a "Solution" label over a "Task 2 – Code, Output ..." cell, names its task
+        named = (lm.group(1) or _leading_task_number(fill.text)) if lm else None
+        if named:
+            task_hint = f"T{named}"
         elif preceding:
             task_hint = preceding[-1]["id"]
-        # "Task 2 Solution" boxes cover a whole task; generic boxes ("Your answer:") belong to the unit above
-        scope = "task" if (lm and lm.group(1)) else "unit"
+        # boxes naming a task cover the whole task; generic boxes ("Your answer:") belong to the unit above
+        scope = "task" if named else "unit"
         unit_hint = task_hint
         if preceding:
             parts_before = [p for p in preceding[-1]["parts"]
@@ -469,6 +490,45 @@ def _analyse(insp: Inspection) -> None:
                 f"The introduction mentions '{label}' but no task covers it. If the lab expects it, add a closing "
                 "task with placement 'end' (it may live in an earlier lab's manual)."
             )
+
+
+def _unique_id(base: str, used: set[str], text: str, warnings: list[str]) -> str:
+    """Never hand out the same id twice: a repeated heading gets a '-dupN' id and a warning."""
+    uid, n = base, 1
+    while uid in used:
+        n += 1
+        uid = f"{base}-dup{n}"
+    if uid != base:
+        warnings.append(f"'{normalize(text)[:60]}' repeats {base}; it was given id {uid}. Check the manual's "
+                        "numbering and merge or rename it in the plan.")
+    used.add(uid)
+    return uid
+
+
+def _leading_task_number(text: str) -> str | None:
+    m = re.match(r"\s*Task\s*(\d+)\b(?!\.\d)", text, re.I)
+    return m.group(1) if m else None
+
+
+_DB_CREATES = re.compile(r"\bCREATE\s+TABLE\b|\.to_sql\s*\(", re.I)
+_WRITE_MODE = r"\s*,\s*(?:mode\s*=\s*)?[\"'][wax]"
+
+
+def _file_role(name: str, text: str) -> str:
+    """'output' when the manual's code creates the file before anything reads it, else 'input' (must be supplied).
+
+    shortcut: only literal names inside the call count (not `path = "x.csv"; df.to_csv(path)`); the agent
+    reviews required_files against the manual anyway.
+    """
+    lit = r"\s*\(\s*[rRfFbB]?[\"'](?:[^\"'\n]*[/\\])?" + re.escape(name) + r"[\"']"
+    writes = [m.start() for m in re.finditer(r"(?:\.to_[a-z]+|savefig|\.save|\.write\.\w+)" + lit, text)]
+    writes += [m.start() for m in re.finditer(r"\bopen" + lit + _WRITE_MODE, text)]
+    reads = [m.start() for m in re.finditer(r"(?:read_[a-z]+|\bload\w*|imread|\.read\.\w+)" + lit, text)]
+    reads += [m.start() for m in re.finditer(r"\bopen" + lit + f"(?!{_WRITE_MODE})", text)]
+    # sqlite3.connect() creates a missing database; a lab that creates its own tables owns the file
+    connects = [m.start() for m in re.finditer(r"sqlite3\.connect" + lit, text)]
+    (writes if _DB_CREATES.search(text) else reads).extend(connects)
+    return "output" if writes and (not reads or min(writes) < min(reads)) else "input"
 
 
 def _is_question(text: str) -> bool:
@@ -584,6 +644,21 @@ COLAB_BLOCKERS = [
     (re.compile(r"\beclipse\b|intellij|netbeans|android studio", re.I), "a desktop IDE"),
     (re.compile(r"virtualbox|vmware|\bssh\b", re.I), "a virtual machine or SSH access"),
 ]
+# local software a lab needs even when it also names Colab (Lab 1: Colab for Python, SQL Server for the SQL task);
+# sqlite3 and pandas SQL run in Colab and are not matched
+COLAB_HARD_BLOCKERS = [
+    (re.compile(r"\bSSMS\b|SQL\s+Server\s+(?:Management\s+Studio|Express|Developer)|Microsoft\s+SQL\s+Server|"
+                r"\bMSSQL\b|\bsqlcmd\b", re.I), "Microsoft SQL Server and SSMS"),
+]
+# interactive Colab widgets the CLI cannot click; they do not block the lab
+COLAB_ATTENTION = [
+    (re.compile(r"files\.upload\s*\("),
+     "files.upload() opens a browser file picker the CLI cannot click: upload the lab's files to the runtime "
+     "directly instead and load them by name."),
+    (re.compile(r"drive\.mount\s*\("),
+     "drive.mount() needs an interactive Google sign-in the CLI cannot click: upload the files to the runtime "
+     "directly instead of reading them from Drive."),
+]
 
 
 def colab_fit(text: str) -> dict[str, Any]:
@@ -591,8 +666,12 @@ def colab_fit(text: str) -> dict[str, Any]:
 
     A manual written for Colab wins over incidental mentions (a Hadoop lab that skips an "AWS bundle").
     """
-    blockers = [label for pattern, label in COLAB_BLOCKERS if pattern.search(text)]
-    if COLAB_SIGNAL.search(text):
+    hard = [label for pattern, label in COLAB_HARD_BLOCKERS if pattern.search(text)]
+    blockers = hard + [label for pattern, label in COLAB_BLOCKERS if pattern.search(text)]
+    needs_attention = [note for pattern, note in COLAB_ATTENTION if pattern.search(text)]
+    if hard:
+        ok, reason = False, f"It needs {' and '.join(hard)}, which Google Colab cannot provide."
+    elif COLAB_SIGNAL.search(text):
         ok, reason = True, "The manual is written for Google Colab."
     elif blockers:
         needs = blockers[0] if len(blockers) == 1 else ", ".join(blockers[:-1]) + " and " + blockers[-1]
@@ -601,7 +680,7 @@ def colab_fit(text: str) -> dict[str, Any]:
         ok, reason = True, "A Python lab: it runs in Google Colab even though the manual does not name it."
     else:
         ok, reason = False, "It is not a Python notebook lab, so it cannot be done in Google Colab."
-    return {"colab_ok": ok, "reason": reason, "blockers": blockers}
+    return {"colab_ok": ok, "reason": reason, "blockers": blockers, "needs_attention": needs_attention}
 
 
 def colab_features(insp: Inspection) -> list[dict[str, Any]]:
