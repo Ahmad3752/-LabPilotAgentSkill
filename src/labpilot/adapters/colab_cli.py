@@ -3,11 +3,16 @@
 Verified upstream behaviour this adapter relies on:
   * `colab new -s NAME` allocates a CPU runtime when --gpu/--tpu are omitted.
   * `colab upload -s NAME LOCAL REMOTE` / `colab download -s NAME REMOTE LOCAL`.
-  * `colab exec -s NAME -f cell.ipynb --timeout SECONDS` runs each code cell in the
-    session's persistent kernel (cwd /content) and writes `cell_output.ipynb` next
-    to the input with real nbformat outputs (stream / display_data /
-    execute_result / error). It exits 0 even when a cell raises, so LabPilot
-    decides success from the output objects, never from the exit code.
+  * `colab exec -s NAME -f cells.ipynb --timeout SECONDS` first runs `os.chdir('/content')`,
+    then every code cell in order in the session's persistent kernel, and writes
+    `cells_output.ipynb` next to the input with real nbformat outputs (stream /
+    display_data / execute_result / error). A cell that raises does NOT stop it: the
+    error is only an output and the exit code stays 0. Only a transport error stops
+    it (no kernel message for --timeout seconds, which is an idle limit, a kernel
+    restart, a lost connection); the output notebook is then still written with the
+    cells run so far. So LabPilot decides success from the output objects, never
+    from the exit code, and runs several cells per call behind a kernel-side gate
+    (`CONTROL_SRC`) that blanks every cell after a failure.
   * `colab stop -s NAME` releases the runtime.
   * Upstream lists Linux and macOS; 0.8.0 was also verified natively on Windows 11.
   * Authentication is the CLI's own OAuth (paste-code) or ADC flow; LabPilot never
@@ -53,6 +58,73 @@ AUTH_HINTS = re.compile(r"(authorization code|Enter the authorization|accounts\.
 QUOTA_HINTS = re.compile(r"(quota|resource exhausted|429|usage limit|no backend|not available|compute units)", re.I)
 GONE_HINTS = re.compile(r"(appears to be lost|session .* not found)", re.I)  # nothing left to release
 LOST_HINTS = re.compile(r"(appears to be lost|session .* not found|connection (refused|closed|reset)|websocket)", re.I)
+BATCH_CELLS = 5  # lab cells per `colab exec` call: each call costs seconds of fixed overhead
+BATCH_WALL_CAP_S = 3600
+CONTROL = "# labpilot-control"  # first line of LabPilot's own cells; the gate never blanks them
+GATE = "LABPILOT_GATE "
+# A control cell runs before, between and after the lab cells of one `colab exec` call. It reports
+# how the previous lab cell ended (passed / failed / skipped / lost) with a kernel timestamp, sets
+# `_labpilot_marker` only after a passed cell, and installs an IPython input transformer (the gate)
+# that turns every later lab cell into an empty cell once one failed, so their code never runs.
+# A lab cell counts as failed when it raised or showed a traceback (an `error` output), the same
+# rule LabPilot applies to the outputs. The lab cells themselves are sent unchanged.
+CONTROL_SRC = '''# labpilot-control
+def _labpilot_control(token, prev, last, workdir):
+    import datetime, os
+    ip = get_ipython()
+    st = getattr(ip, "_labpilot_state", None)
+    if prev is None:
+        outcome = "open"
+        st = ip._labpilot_state = {"token": token, "closed": False, "tb": False}
+    elif st is None or st["token"] != token:  # the kernel restarted: its state is gone
+        outcome = "lost"
+        st = ip._labpilot_state = {"token": token, "closed": True, "tb": False}
+    elif st["closed"]:
+        outcome = "skipped"
+    elif st["tb"] or not ip.last_execution_succeeded:
+        outcome = "failed"
+        st["closed"] = True
+    else:
+        outcome = "passed"
+        ip.user_ns["_labpilot_marker"] = prev
+    st["tb"] = False
+
+    def _labpilot_gate(lines):
+        s = getattr(ip, "_labpilot_state", None)
+        if s and s["closed"] and not (lines and lines[0].startswith("# labpilot-control")):
+            return []
+        return lines
+
+    t = ip.input_transformers_cleanup
+    t[:] = [f for f in t if getattr(f, "__name__", "") != "_labpilot_gate"] + ([] if last else [_labpilot_gate])
+    show = getattr(ip, "_showtraceback", None)
+    if show is not None and not getattr(show, "_labpilot", False):
+        def _labpilot_tb(*args, **kwargs):
+            s = getattr(ip, "_labpilot_state", None)
+            if s is not None:
+                s["tb"] = True
+            return show(*args, **kwargs)
+        _labpilot_tb._labpilot = True
+        ip._showtraceback = _labpilot_tb
+    os.chdir(workdir)  # each lab cell starts in /content, as it did with one `colab exec` per cell
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    print("LABPILOT_GATE", outcome, now)
+'''
+
+
+def control_cell(token: str, prev: str | None, last: bool) -> str:
+    return f"{CONTROL_SRC}_labpilot_control({token!r}, {prev!r}, {last!r}, {REMOTE_DIR!r})\ndel _labpilot_control\n"
+
+
+def _gate(outputs: list[dict[str, Any]]) -> tuple[str, str] | None:
+    """(outcome, kernel timestamp) printed by a control cell, or None if it never ran."""
+    for o in outputs:
+        text = o.get("text", "") if o.get("output_type") == "stream" else ""
+        for line in (text if isinstance(text, str) else "".join(text)).splitlines():
+            if line.startswith(GATE):
+                outcome, _, ts = line[len(GATE):].partition(" ")
+                return outcome, ts.strip()
+    return None
 
 
 class ColabCliBackend:
@@ -74,7 +146,7 @@ class ColabCliBackend:
 
     def _classify_transport(self, res: CmdResult) -> ErrorCode:
         text = strip_ansi(res.stdout + "\n" + res.stderr)
-        if res.timed_out:
+        if res.timed_out or "Timeout waiting for" in text:  # killed by us, or the CLI's idle --timeout
             return ErrorCode.TIMEOUT
         if LOST_HINTS.search(text):  # upstream prints "appears to be lost (404/401)" for dead sessions
             return ErrorCode.RUNTIME_DISCONNECTED
@@ -182,74 +254,113 @@ class ColabCliBackend:
                     problems.append(f"{remote}: integrity check failed after upload")
         return StageResult(ok=not problems, staged=staged, problems=problems)
 
-    def _exec_code(self, handle: RuntimeHandle, source: str, cell_id: str, timeout: float = 600) -> dict[str, Any]:
-        """Run one code cell via `colab exec -f <cell>.ipynb` and return the executed cell dict."""
+    def _exec_nb(self, handle: RuntimeHandle, cells: list[tuple[str, str]], name: str, idle_s: float,
+                 wall_s: float) -> tuple[list[dict[str, Any]], CmdResult]:
+        """Run (cell id, source) cells in one `colab exec -f <name>.ipynb`; return each code cell's outputs."""
         work = Path(handle.state["work"])
         nb = new_notebook()
-        cell = new_code_cell(source)
-        cell.id = re.sub(r"[^A-Za-z0-9_-]", "-", cell_id)[:64]
-        nb.cells.append(cell)
-        src = work / f"{cell.id}.ipynb"
-        out = work / f"{cell.id}_output.ipynb"
+        for cid, source in cells:
+            cell = new_code_cell(source)
+            cell.id = re.sub(r"[^A-Za-z0-9_-]", "-", cid)[:64]
+            nb.cells.append(cell)
+        stem = re.sub(r"[^A-Za-z0-9_-]", "-", name)[:64]
+        src = work / f"{stem}.ipynb"
+        out = work / f"{stem}_output.ipynb"
         out.unlink(missing_ok=True)
         nbformat.write(nb, str(src))
-        res = self._colab("exec", "-s", handle.state["session"], "-f", self._path(src), "--timeout", str(int(timeout)),
-                          timeout=timeout + 120)
-        (work / f"{cell.id}.log").write_text(strip_ansi(res.stdout[-20000:] + "\n--- stderr ---\n" + res.stderr[-20000:]),
-                                             encoding="utf-8")
+        res = self._colab("exec", "-s", handle.state["session"], "-f", self._path(src), "--timeout", str(int(idle_s)),
+                          timeout=wall_s)
+        (work / f"{stem}.log").write_text(strip_ansi(res.stdout[-20000:] + "\n--- stderr ---\n" + res.stderr[-20000:]),
+                                          encoding="utf-8")
         if not out.exists():
             code = self._classify_transport(res)
             raise LabPilotError(code, f"colab exec produced no output notebook ({code}).", exit_code=ExitCode.RUNTIME,
                                 details={"stderr": strip_ansi(res.stderr)[-500:]})
-        executed = nbformat.read(str(out), as_version=4)
-        c = next((x for x in executed.cells if x.cell_type == "code"), None)
-        if c is None:
-            raise LabPilotError(ErrorCode.RUNTIME_DISCONNECTED, "colab exec output notebook has no code cell.",
+        executed = [x for x in nbformat.read(str(out), as_version=4).cells if x.cell_type == "code"]
+        if len(executed) != len(cells):
+            raise LabPilotError(ErrorCode.RUNTIME_DISCONNECTED, "colab exec output notebook does not match its input.",
                                 exit_code=ExitCode.RUNTIME)
-        return {"outputs": [dict(o) for o in c.get("outputs", [])], "execution_count": c.get("execution_count"),
-                "returncode": res.returncode}
+        return [{"outputs": [dict(o) for o in c.get("outputs", [])], "execution_count": c.get("execution_count")}
+                for c in executed], res
+
+    def _exec_code(self, handle: RuntimeHandle, source: str, cell_id: str, timeout: float = 600) -> dict[str, Any]:
+        """Run one LabPilot cell (probe, upload check, health) in its own `colab exec` call."""
+        cells, res = self._exec_nb(handle, [(cell_id, f"{CONTROL}\n{source}")], cell_id, timeout, timeout + 120)
+        return {**cells[0], "returncode": res.returncode}
 
     def execute_cells(
         self, handle: RuntimeHandle, ctx: RunContext, cells: list[CellRequest], on_event: OnEvent
     ) -> list[CellExecution]:
+        """Run the lab cells BATCH_CELLS per `colab exec` call, with the result one call per cell gave.
+
+        Each cell keeps its own outputs and status, `_labpilot_marker` is set only after a passed cell,
+        and no cell runs after one failed: the control cells' gate blanks them in the kernel and
+        LabPilot records them as blocked.
+        """
         results: list[CellExecution] = []
         failed = False
-        for c in cells:
-            base: dict[str, Any] = dict(run_id=ctx.run.id, attempt_id=ctx.attempt_id, cell_id=c.cell_id, task_id=c.task_id,
-                        code_sha256=c.code_sha256, backend=self.name, runtime=handle.identity)
-            if failed:
-                results.append(CellExecution(**base, status="blocked", error_code="UPSTREAM_FAILED",
-                                             error_message="Not executed because an earlier cell failed."))
-                continue
-            on_event({"event": "cell_start", "cell_id": c.cell_id})
-            started = utcnow()
-            try:
-                cell = self._exec_code(handle, c.source, c.cell_id, timeout=ctx.timeout_s)
-            except LabPilotError as exc:
-                results.append(CellExecution(**base, status="failed", started_at=started, ended_at=utcnow(),
-                                             error_code=str(exc.code), error_type="TransportError", error_message=exc.message))
-                on_event({"event": "cell", "cell_id": c.cell_id, "status": "failed", "error_type": str(exc.code)})
-                failed = True
-                continue
-            outputs = cell["outputs"]
-            truncated = bound_outputs(outputs, 200_000)
-            s = summarize(outputs)
-            status: Literal["passed", "failed"] = "failed" if s["error"] else "passed"
-            results.append(CellExecution(
-                **base, status=status, execution_count=cell.get("execution_count"), started_at=started, ended_at=utcnow(),
-                stdout=s["stdout"][-20000:], stderr=s["stderr"][-20000:], outputs=outputs, output_truncated=truncated,
-                error_type=s["error"]["ename"] if s["error"] else None,
-                error_message=s["error"]["evalue"] if s["error"] else None,
-                traceback=s["error"]["traceback"] if s["error"] else None,
-            ))
-            on_event({"event": "cell", "cell_id": c.cell_id, "status": status})
-            if status == "failed":
-                failed = True
-            else:
-                # marker lets resume prove the remote kernel still holds this state
-                self._exec_code(handle, f"_labpilot_marker = {c.cell_id!r}", f"marker-{c.cell_id}", timeout=60)
-                ctx.run.manifest.backend_state["last_marker"] = c.cell_id
+        for first in range(0, len(cells), BATCH_CELLS):
+            batch = cells[first:first + BATCH_CELLS]
+            if not failed:
+                token = uuid.uuid4().hex[:12]
+                nb: list[tuple[str, str]] = [("lp-ctl-0", control_cell(token, None, False))]
+                for i, c in enumerate(batch):
+                    nb += [(c.cell_id, c.source), (f"lp-ctl-{i + 1}", control_cell(token, c.cell_id, i == len(batch) - 1))]
+                on_event({"event": "cell_start", "cell_id": batch[0].cell_id, "cell_ids": [c.cell_id for c in batch]})
+                started = utcnow()
+                transport: LabPilotError | None = None
+                executed: list[dict[str, Any]] = []
+                res = CmdResult(0, "", "")
+                try:
+                    executed, res = self._exec_nb(handle, nb, f"batch-{first:04d}", ctx.timeout_s,
+                                                  min(len(batch) * ctx.timeout_s, BATCH_WALL_CAP_S) + 120)
+                except LabPilotError as exc:
+                    transport = exc
+                ended = utcnow()
+                opened = _gate(executed[0]["outputs"]) if executed else None
+                prev_ts = opened[1] if opened else started
+            for i, c in enumerate(batch):
+                base = self._base(ctx, handle, c)
+                if failed:
+                    results.append(CellExecution(**base, status="blocked", error_code="UPSTREAM_FAILED",
+                                                 error_message="Not executed because an earlier cell failed."))
+                    continue
+                gate = _gate(executed[2 * i + 2]["outputs"]) if executed else None
+                if gate is None or gate[0] == "lost":  # the call stopped, or the kernel restarted, during this cell
+                    if transport is None:
+                        code = ErrorCode.RUNTIME_DISCONNECTED if gate else self._classify_transport(res)
+                        transport = LabPilotError(code, "The Colab kernel restarted while this cell ran; its state is gone."
+                                                  if gate else f"colab exec stopped while this cell ran ({code}).")
+                    results.append(CellExecution(**base, status="failed", started_at=prev_ts, ended_at=ended,
+                                                 error_code=str(transport.code), error_type="TransportError",
+                                                 error_message=transport.message))
+                    on_event({"event": "cell", "cell_id": c.cell_id, "status": "failed", "error_type": str(transport.code)})
+                    failed = True
+                    continue
+                outputs = executed[2 * i + 1]["outputs"]
+                truncated = bound_outputs(outputs, 200_000)
+                s = summarize(outputs)
+                status: Literal["passed", "failed"] = "failed" if s["error"] or gate[0] != "passed" else "passed"
+                results.append(CellExecution(
+                    **base, status=status, execution_count=executed[2 * i + 1].get("execution_count"),
+                    started_at=prev_ts, ended_at=gate[1] or ended,
+                    stdout=s["stdout"][-20000:], stderr=s["stderr"][-20000:], outputs=outputs, output_truncated=truncated,
+                    error_type=s["error"]["ename"] if s["error"] else None,
+                    error_message=s["error"]["evalue"] if s["error"] else (
+                        None if status == "passed" else "The kernel reported this cell as not successful."),
+                    traceback=s["error"]["traceback"] if s["error"] else None,
+                ))
+                prev_ts = gate[1] or ended
+                on_event({"event": "cell", "cell_id": c.cell_id, "status": status})
+                if status == "failed":
+                    failed = True
+                else:
+                    ctx.run.manifest.backend_state["last_marker"] = c.cell_id  # the control cell set it in the kernel
         return results
+
+    def _base(self, ctx: RunContext, handle: RuntimeHandle, c: CellRequest) -> dict[str, Any]:
+        return dict(run_id=ctx.run.id, attempt_id=ctx.attempt_id, cell_id=c.cell_id, task_id=c.task_id,
+                    code_sha256=c.code_sha256, backend=self.name, runtime=handle.identity)
 
     def health(self, handle: RuntimeHandle) -> RuntimeHealth:
         res = self._colab("status", "-s", handle.state["session"], timeout=120)

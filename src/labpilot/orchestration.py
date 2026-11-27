@@ -630,10 +630,17 @@ def execute(run: Run, cell: str | None = None, timeout: int | None = None, retry
     m.backend_state["executing_attempt"] = attempt_id  # cleared by apply_records; left behind only by a crash
     run.set_state(RunState.EXECUTING, f"attempt {attempt_id} on {getattr(be, 'label', be.name)}")
 
+    where = "Colab" if (m.backend or "").startswith("colab") else "Local kernel"
+    finished: set[str] = set()  # a set, so a replay after a lost runtime does not count cells twice
+
     def on_event(ev: dict[str, Any]) -> None:
         if ev.get("event") in ("cell", "cell_start"):
-            run.event("cell", cell_id=ev.get("cell_id"), status=ev.get("status", "running"),
-                      message=ev.get("error_type") or "")
+            ids = ev.get("cell_ids") or [ev.get("cell_id")]
+            if ev.get("event") == "cell":
+                finished.add(str(ev.get("cell_id")))
+            run.event("cell", cell_id=ev.get("cell_id") if len(ids) == 1 else f"{ids[0]} .. {ids[-1]}",
+                      status=ev.get("status", "running"), message=ev.get("error_type") or "",
+                      done=len(finished), total=len(targets), where=where)
         elif ev.get("event") == "runtime":
             run.event("progress", message=f"runtime {ev.get('runtime')}")
 
