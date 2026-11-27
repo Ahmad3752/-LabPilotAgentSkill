@@ -41,6 +41,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "telemetry": False,
     "registered_mcp": [],  # MCP registrations LabPilot made (for clean uninstall)
     "installed_skills": [],  # skill directories LabPilot installed
+    "student": {},  # name / id the user gave once; local only, never sent anywhere
 }
 
 
@@ -71,6 +72,24 @@ def save_config(cfg: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(path, cfg)
     return path
+
+
+def remember_student(name: str | None, student_id: str | None) -> dict[str, str]:
+    """Save the name/ID the user gave (new values overwrite) and return the saved pair."""
+    cfg = load_config()
+    saved = {k: v for k, v in (cfg.get("student") or {}).items() if v}
+    given = {k: v.strip() for k, v in (("name", name), ("id", student_id)) if v and v.strip()}
+    if given:
+        saved.update(given)
+        cfg["student"] = saved
+        save_config(cfg)
+    return saved
+
+
+def saved_student(cfg: dict[str, Any]) -> dict[str, str | None] | None:
+    """The saved name/ID for `labpilot doctor`, or None when nothing is saved (the agent then asks once)."""
+    st = cfg.get("student") or {}
+    return {"name": st.get("name"), "id": st.get("id")} if any(st.values()) else None
 
 
 # ------------------------------------------------------------------ profiles

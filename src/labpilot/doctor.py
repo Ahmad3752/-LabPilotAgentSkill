@@ -14,7 +14,7 @@ from typing import Any
 from labpilot import __version__
 from labpilot.adapters.colab_cli import AUTH_HINTS, ColabCliBackend
 from labpilot.agents import agent_access_status, skill_status, skill_targets
-from labpilot.config import load_config
+from labpilot.config import load_config, saved_student
 from labpilot.documents.validate import find_renderer, find_word
 from labpilot.errors import ErrorCode, ExitCode, LabPilotError, strip_ansi
 from labpilot.procutil import run_cmd
@@ -237,6 +237,7 @@ def doctor(project_dir: Path | None = None) -> dict[str, Any]:
         "page_renderer": {"available": bool(find_renderer() or find_word()),
                           "kind": "libreoffice" if find_renderer() else ("microsoft-word" if find_word() else None)},
         "config": {"backend": cfg.get("backend"), "telemetry": cfg.get("telemetry")},
+        "student": saved_student(cfg),
         "output_dir": _writable(project_dir / ".labpilot"),
     }
     problems = []

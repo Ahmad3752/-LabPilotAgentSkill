@@ -56,7 +56,7 @@ The script does everything in order and stops only where you have to type someth
 3. **NUST LMS sign-in:** it installs the [Nuts LMS MCP](https://github.com/deeznust42/nutslms-mcp) and asks for your LMS username and password. That prompt belongs to the LMS tool: LabPilot never sees or stores your password. It then connects the LMS to Codex and Claude Code.
 4. It opens Codex in `C:\Labs` already asking: *"Use LabPilot: are there any new labs on the LMS?"*
 
-The agent lists your labs and says which ones can be done in Google Colab. Answer with the one you want, for example "do Lab 1" (older labs work too). It asks before it downloads the lab, asks before it uses Colab, and then solves it. Rerunning the script skips whatever is already done. Add `-NoLms` if you are not at NUST.
+The agent lists your labs and says which ones can be done in Google Colab. Answer with the one you want, for example "do Lab 1" (older labs work too). It then asks one question: **yes** plus your name and CMS ID. After that it downloads the lab, runs it on Colab and fills the Word copy without asking again, posting a one-line status per phase. Your name and CMS ID are saved on your PC (`labpilot init --student-name ... --student-id ...` changes them), so later labs only ask for yes. Rerunning the script skips whatever is already done. Add `-NoLms` if you are not at NUST.
 
 **Next time**, open a new PowerShell and run:
 
@@ -98,6 +98,7 @@ This runs a synthetic sample lab through the real CLI with known agent files.
 | Checking the university LMS for new labs (Nuts LMS MCP, read-only) | Verified with a real account (finding labs); downloads not yet verified |
 | One-command Windows installer (`scripts/install.ps1`): install, sign-ins, LMS connection, start the agent | Install part verified on a clean PC; the sign-in, LMS and start steps not yet |
 | Google Colab through the browser (`colab-mcp`) | Experimental, not yet verified |
+| One question up front (yes + name/CMS ID), then no more questions; name/ID saved on your PC | Skill rule; saving unit-tested; not yet tried in a real run |
 | A full lab from one prompt in Codex | Next test |
 | macOS, Linux | Implemented, not yet verified |
 
@@ -106,7 +107,7 @@ Screenshots are renderings of the executed notebook, not captures of the Colab w
 ## Privacy and academic integrity
 
 - LabPilot never submits anything, never logs in to the LMS for you and never handles your passwords.
-- Files go to Colab only with your consent. Nothing is sent anywhere else.
+- Files go to Colab only with your consent. Nothing is sent anywhere else. Your saved name and CMS ID stay in LabPilot's config file on your PC.
 - It stops if the manual or your course forbids AI assistance.
 - The result is a draft for **your review**: read it, understand it, personalise the answers and follow your course's rules.
 

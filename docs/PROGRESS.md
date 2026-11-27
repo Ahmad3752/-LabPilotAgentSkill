@@ -16,7 +16,9 @@ Last updated: 2026-11-27.
 | 2026-11-27 | LMS TLS error: fix upstream by PR, and meanwhile use a LabPilot-side workaround. | `lms.nust.edu.pk` needs legacy TLS renegotiation. A LabPilot LMS client was rejected because it would have to handle NUST credentials. |
 | 2026-11-27 | Goal: a student uses it and the lab gets done, automated end to end, Colab only. The user's CS-412 course has no AI-assistance rule. | User statement. The final acceptance test is the user doing a real lab with the skill from Codex (and Claude Code). |
 | 2026-11-27 | Colab check first: LabPilot decides from the Word manual whether a lab can be done in Colab. Not Python notebook code (Java programs, AWS or cloud consoles, Docker or terminal labs) means it tells the user and stops. | The user wants every lab to start with "can Colab do this?". The check was calibrated on Labs 1–11. |
-| 2026-11-27 | The agent always asks "I found <lab>. Should I do it for you?" before fetching, and asks for Colab permission on every run. | User decision: no standing consent, and no fetching without asking. |
+| 2026-11-27 | Ask once, at discovery: one message with the lab, the Colab verdict and sign-in state, asking for "yes + name + CMS ID"; the agent ends its turn there. The yes is the Colab consent for that run (`--allow-cloud --allow-upload`); after it, no more questions until COMPLETED or a blocker only the user can fix. One status line with a percentage per phase. | Codex Lab 3 run: the agent asked mid-work, kept going, hit CONSENT_REQUIRED after 4 minutes and waited while the user was away. Still no standing consent and no fetching without asking. |
+| 2026-11-27 | The student name and CMS ID are saved once in the local user config (`labpilot init --student-name/--student-id`; new values overwrite) and reported by `doctor --json`. Never sent anywhere. | The Lab 3 report had blank name/ID fields; the user wants to give them once ever. |
+| 2026-11-27 | Writing rules in the skill (*How to write* in `references/workflow.md`): the student's own voice, answer first, short answers, rounded numbers, plain-text formulas, no meta text or own setup/submission sections, deprecation warnings silenced. No detector-evasion tricks. | The Lab 3 report read like a bot wrote it. |
 | 2026-11-27 | Terminal or Docker labs (like Lab 11, Kafka) are out of scope for now. | The user will discuss them later. Feasible with tmux `send-keys`/`capture-pane`, but it needs a Linux and Docker host, which reopens "Colab only". |
 | 2026-11-27 | One-command setup: `install.ps1` installs everything, runs the Google and LMS sign-ins (each tool's own prompt in the user's terminal), connects the LMS to Codex and Claude Code, and opens the agent asking for new labs. | User: "as soon as a person downloads it, it configures moodle-mcp, logins, Colab, and starts". LabPilot still never reads or stores a password. |
 | 2026-11-27 | Lab code runs only on Google Colab. Not signed in means the user signs in first; no local option. The local kernel stays only for tests and the offline demo (`LABPILOT_ALLOW_LOCAL=1`). | First real Codex run: local pandas was blocked by Windows Application Control. User: "lab code should be in colab". |
@@ -37,13 +39,15 @@ Last updated: 2026-11-27.
 
 ## Machine gotchas (this Windows 11 PC)
 
-- Tests: the default temp dir is blocked. Pass `--basetemp <scratch dir>` to pytest. Expect about 140 passed and 2 skipped (opt-in Colab, symlinks).
+- Tests: the default temp dir is blocked. Pass `--basetemp <scratch dir>` to pytest. Expect about 147 passed and 2 skipped (opt-in Colab, symlinks).
 - Smart App Control blocks unsigned `.exe` launchers, so `moodle-mcp` runs as `"%APPDATA%\uv\tools\nutslms-mcp\Scripts\python.exe" -m moodle_mcp`.
 - The Colab CLI 0.8.0 is installed in a LabPilot-owned venv and signed in. `labpilot doctor --json` shows it.
 - `gh` is not installed, so pull requests are opened in the browser.
 - `docs/INTERVIEW_PREP.md` is the user's personal interview prep. It is deliberately left uncommitted.
 
 ## Session log (newest first; keep the last five)
+
+- **2026-11-27:** After the Codex Lab 3 run (asked mid-work, waited at CONSENT_REQUIRED, blank name/ID, bot-like text): the skill now asks once at discovery (yes + name + CMS ID), ends its turn, then runs to the end with percentage status lines; `init` saves the name/ID locally and `doctor --json` reports them; the skill has *How to write* rules and drops the draft plan's SETUP appendix. Not yet tried in a real run.
 
 - **2026-11-27:** First real Codex run (Lab 2) worked but took 35 minutes and 5 user commands, because Codex's sandbox could not start LabPilot and the agent improvised runners. Fixed in four parallel branches: Codex/Claude agent access (rules file, approval mode, doctor check, "never improvise" in the skill); Colab-only execution and `labpilot finish`; manual parsing (activities, Q-labelled questions, generated files, headings, SQL Server blocker, `needs_attention`); long code split into screenshot parts.
 
@@ -52,5 +56,3 @@ Last updated: 2026-11-27.
 - **2026-11-27:** The LMS is now the main way to start a lab in the README ("any new labs?" → pick one → fetch → Colab check → solve). `doctor` prints the LMS registration for Codex and Claude with real paths (the `~` redaction is fixed), a valid PowerShell login command (`& "…python.exe"`), and finds `moodle-mcp` even when uv's bin is not on PATH. Naming a lab ("do Lab 1") uses `--include-past`.
 
 - **2026-11-27:** First full clean run of `install.ps1`, which works. Rewrote the README quick start so a friend can follow it from a terminal: `-ExecutionPolicy Bypass`, a new terminal after the PATH change, starting the agent in `C:\Labs`, both Codex and Claude, and a note that ChatGPT cannot run it.
-
-- **2026-11-27:** Added the Colab check (`colab_fit` in `init`/`inspect`, plus `labpilot colab-check`), calibrated on the real CS-412 Labs 1–11, which all came out correct. The skill now checks Colab first and asks "should I do it?". Fixed the LMS download instruction: `dest` must be a file path.

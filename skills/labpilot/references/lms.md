@@ -48,8 +48,9 @@ folder, then pass the file to LabPilot. Never edit, merge or invent tool output.
    `labpilot colab-check .labpilot/lms/manual-<assignid>.json --json`.
 5. Tell the user which new labs there are (course, name, due date, overdue / not open yet) with the verdict.
    A lab with `colab_ok: false`: say "<lab> cannot be done in Google Colab: <reason>" and do not offer it.
-   For each Colab lab ask: "I found <lab>. Should I do it for you?" Always ask; fetch only what the user
-   confirms. Stop here if they only asked whether there is a new lab.
+   For the Colab labs, send the one question from SKILL.md *Ask once, then run* (`labpilot doctor --json` gives
+   the Colab sign-in and saved name/ID) and end your turn. Fetch only what the user confirms. Stop here if they
+   only asked whether there is a new lab.
    Finding a lab's files:
    - **Attached to the assignment** (most common): `call_api` with `wsfunction`
      `mod_assign_get_assignments` and `params_json` `{"courseids": [<courseid>]}`. Use the assignment's
@@ -65,7 +66,8 @@ folder, then pass the file to LabPilot. Never edit, merge or invent tool output.
    and marks the lab in progress.
    - `problem` set: e.g. the manual is only a PDF. LabPilot needs the `.docx` manual, so ask the user for it.
 8. Run the normal workflow from step 1 of SKILL.md with the `next` command
-   (`labpilot init --lab "<manual>.docx"`). `init` records the LMS course and assignment in the run
+   (`labpilot init --lab "<manual>.docx"`, plus `--student-name/--student-id` if the user just gave them), without
+   asking anything more. `init` records the LMS course and assignment in the run
    (`labpilot status` → `input_provenance`).
 9. When the run is COMPLETED: `labpilot lms mark <assignid> --state processed --run-id <run_id> --json`.
    If the user says to skip a lab: `--state ignored`. `labpilot lms list --json` shows the ledger.

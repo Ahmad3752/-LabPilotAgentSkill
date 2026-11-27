@@ -26,7 +26,7 @@ The local Jupyter kernel exists only for LabPilot's own tests and offline demo. 
 |---|---|
 | Not signed in (`AUTH_REQUIRED`) | Run `labpilot colab-login` in your own terminal (Google's sign-in), then run the same command again. Never ask for passwords or tokens. |
 | Colab CLI missing (`BACKEND_UNAVAILABLE`) | Run `labpilot setup --backend colab-cli --install-colab-cli`, then `labpilot colab-login`. |
-| No consent yet (`next_action.action == "consent"`) | Ask whether LabPilot may use their Google Colab and upload the lab files. On yes, rerun with `--allow-cloud --allow-upload`. |
+| No consent yet (`next_action.action == "consent"`) | The user's yes from SKILL.md *Ask once* is the consent: rerun with `--allow-cloud --allow-upload`. Ask only if they never said yes. |
 | Quota or paid entitlement needed (`QUOTA_EXHAUSTED`) | Explain and wait; run `finish` again later. Never buy anything. |
 | `runtime_release` in the summary | LabPilot tried to release the Colab runtime but could not confirm it. `labpilot cancel <id>` retries. |
 | The manual demands screenshots from the Colab web UI | LabPilot produces labelled renderings of the executed notebook, not Colab UI screenshots. Report this as unmet. |

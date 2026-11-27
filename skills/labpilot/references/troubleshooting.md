@@ -13,7 +13,7 @@
 | AUTH_REQUIRED / WAITING_FOR_AUTH | The user is not signed in to Google Colab. | The user runs `labpilot colab-login` in their own terminal, then you run the same command again. Never collect credentials. |
 | BACKEND_UNAVAILABLE | The Colab CLI is missing, or `--backend local` was asked for (tests and the offline demo only). | `labpilot setup --backend colab-cli --install-colab-cli`, then `labpilot colab-login`. |
 | QUOTA_EXHAUSTED | The Colab quota has run out. | Tell the user; run `finish` again later. There is no local fallback. |
-| CONSENT_REQUIRED | Cloud compute or file upload needs the user's permission. | Ask the user, then pass `--allow-cloud` / `--allow-upload`. |
+| CONSENT_REQUIRED | Cloud compute or file upload needs the user's permission. | Pass `--allow-cloud` / `--allow-upload` (the user's up-front yes). Ask only if they never said yes. |
 | MCP_UNAVAILABLE | The colab-mcp tools are not listed in the host agent. | Reconnect or restart the agent per colab-mcp's docs, or use the default colab-cli backend. |
 | BROWSER_UNAVAILABLE | Chromium for Playwright is missing. | Run `python -m playwright install chromium`. |
 | EVIDENCE_INVALID / EVIDENCE_STALE | A screenshot is blank, a cell has no output, or the code changed after capture. | Fix the cell's output display, then re-execute and capture again. |

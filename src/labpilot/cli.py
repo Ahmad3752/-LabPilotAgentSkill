@@ -140,6 +140,9 @@ def doctor(json_out: bool = JSON_OPT, project_dir: Path = typer.Option(Path.cwd,
                      + (f"; next: {lm['fix']}" if lm["fix"] else ""))
         pr = r["page_renderer"]
         lines.append(f"{mark(pr['available'])}Word page rendering (optional): {pr['kind'] or 'none'}")
+        st = r.get("student")
+        lines.append(f"{mark(st)}student on reports: " + (f"{st['name'] or '?'}, {st['id'] or '?'}" if st else
+                     "not saved (labpilot init ... --student-name X --student-id Y)"))
         lines.append(f"ready: colab={r['ready_for_colab']} local fallback={r['ready_for_local_fallback']}")
         lines += [f"!! {p}" for p in r["problems"]]
         return "\n".join(lines)
@@ -250,20 +253,24 @@ def uninstall(
 def init(
     lab: Path = typer.Option(..., "--lab", help="The lab manual (.docx)."),  # noqa: B008
     data_dir: Path = typer.Option(None, "--data-dir", help="Lab folder with the datasets (default: the manual's folder)."),  # noqa: B008
-    student_name: str = typer.Option(None, help="Fill the student name field (only if you supply it)."),
-    student_id: str = typer.Option(None, help="Fill the CMS/registration field (only if you supply it)."),
+    student_name: str = typer.Option(None, help="Student name; saved on this PC and reused by later runs."),
+    student_id: str = typer.Option(None, help="CMS/registration ID; saved on this PC and reused by later runs."),
     synthetic: bool = typer.Option(False, help="Label this run as a synthetic demo (never the real assignment)."),
     json_out: bool = JSON_OPT,
 ) -> None:
     """Create an isolated run: hash and copy the manual; return the run id."""
+    from labpilot.config import remember_student
     from labpilot.orchestration import init_run, inspect_run
 
     def do() -> dict[str, Any]:
-        run = init_run(lab, data_dir, {"name": student_name, "id": student_id}, synthetic)
+        # a synthetic demo never gets, or saves, the real student's details
+        given = {"name": student_name, "id": student_id}
+        student = given if synthetic else remember_student(student_name, student_id)
+        run = init_run(lab, data_dir, student, synthetic)
         with run.lock():
             summary = inspect_run(run)
         return {"run_id": run.id, "run_dir": str(run.dir), "source_sha256": run.manifest.source_sha256,
-                "inspection": summary, "next": f"labpilot inspect {run.id} --json  (then write plan.json)"}
+                "student": run.manifest.student, "inspection": summary, "next": f"labpilot inspect {run.id} --json  (then write plan.json)"}
 
     _run(do, json_out)
 

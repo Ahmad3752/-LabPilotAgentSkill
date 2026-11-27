@@ -17,12 +17,9 @@ validates each one. Everything between them is one command, `labpilot finish` (b
      "expected_columns": ["order_id", "amount"], "used_by_tasks": ["T1.A", "T1.B"]}
   ],
   "tasks": [
-    {"id": "SETUP", "title": "Environment setup", "placement": "append", "depends_on": [],
-     "instructions": ["Import libraries and load the data"], "observation_questions": [],
-     "required_evidence": ["code", "output"]},
     {"id": "T1.A", "title": "Load the data", "parent": "T1",
      "source_anchor": "b12#3fa2c1d09e8b", "solution_anchor": "b31/r1/c0#e3b0c44298fc",
-     "placement": "anchor", "depends_on": ["SETUP"],
+     "placement": "anchor", "depends_on": [],
      "instructions": ["Show the schema and row count"],
      "observation_questions": [{"id": "T1.A.Q1", "text": "How many rows are there?", "kind": "observed"}],
      "required_evidence": ["code", "output"]}
@@ -32,6 +29,8 @@ validates each one. Everything between them is one command, `labpilot finish` (b
 ```
 
 - `profile`: always `python` (Colab labs install anything else in their own `!pip` setup cell).
+- No `SETUP` task unless the manual has its own setup section. The draft plan adds one; delete it. An `append` task
+  becomes an "Environment setup" appendix in the Word copy.
 - `placement`:
   - `anchor`: insert inside `solution_anchor`, which is usually a solution-box cell from `document.json` `solution_boxes[].fill_anchor`.
   - `after_source`: insert after the task when the manual has no solution box.
@@ -47,8 +46,8 @@ validates each one. Everything between them is one command, `labpilot finish` (b
 {
   "schema_version": 1,
   "cells": [
-    {"id": "setup-imports", "task_id": "SETUP", "setup": true,
-     "source": "import pandas as pd\nprint(pd.__version__)"},
+    {"id": "t1a-imports", "task_id": "T1.A", "setup": true, "expect_output": false,
+     "source": "import warnings\nwarnings.filterwarnings('ignore', category=DeprecationWarning)\nwarnings.filterwarnings('ignore', category=FutureWarning)\nimport pandas as pd"},
     {"id": "t1a-load", "task_id": "T1.A",
      "source": "df = pd.read_csv('sales.csv')\nprint(df.dtypes)\nprint('rows:', len(df))"}
   ],
@@ -62,7 +61,10 @@ Rules for cell code:
 - Shell (`!pip ...`, `subprocess`) and network use trigger warnings (allowed; recorded in the report).
 - Make every required result visible with `print`, `display`, `df.show()`, `plt.show()` or `explain()`. A cell that is expected to show output but prints nothing counts as missing evidence. Set `"expect_output": false` only for cells that truly display nothing.
 - Prove numeric claims with `assert` (use a tolerance for floats). Example: `assert abs(matched + unmatched - total) < 1e-6`.
-- Keep the manual's `!pip install` / `!apt-get` lines in the first setup cell; they run inside Colab. Print library versions there.
+- Keep the manual's `!pip install` / `!apt-get` lines in the first cell of the first task; they run inside Colab.
+- In that first cell, silence only library `DeprecationWarning` and `FutureWarning` (as in the example) unless the
+  manual asks about warnings, so long warning lines stay out of the screenshots. Real errors stay visible.
+- Print rounded values (`f"{x:.3f}"`) unless the manual needs full precision.
 - Keep the starter code from the manual. Fill in only what is missing. Write at the course's level.
 - Check cells should print readable sentences ("Both runs gave the same totals.") rather than `KEY = value` lines. End a cell with `_ = helper(...)` when the last call returns a status code, so that no stray `Out[ ]: 0` appears in the screenshot.
 - Cells execute in order in one kernel. Every `execute` starts a fresh kernel and replays from the first cell, so do not rely on state from an earlier attempt.
@@ -129,20 +131,37 @@ the cells in order, because later cells need the earlier cells' state.
 {
   "schema_version": 1,
   "answers": [
-    {"question_id": "T1.A.Q1", "text": "The file has 1,204 rows (printed by cell t1a-load).",
+    {"question_id": "T1.A.Q1", "text": "The file has 1,204 rows.",
      "source_cell_ids": ["t1a-load"], "verification": "verified"}
   ],
   "task_summaries": [
-    {"task_id": "T1.A", "explanation": "Reads the CSV with pandas and prints its column types and row count."}
+    {"task_id": "T1.A", "explanation": "I loaded the CSV with pandas and checked the column types and row count."}
   ]
 }
 ```
 
-- Write answers as plain explanatory sentences that state the observed numbers. Never paste variable dumps or log lines.
+- Write every answer and summary as described in *How to write* below.
+- `task_summaries` are optional: add one only where the manual asks for an explanation or it genuinely helps.
 - `table_cells`: values the manual asks you to copy into its tables, as `{"anchor": "<from document.json fill_in_tables>", "text": "28", "source_cell_ids": ["..."]}`.
 - `verified`: every cited cell passed in the current attempt.
 - `conceptual`: only for questions of `kind: conceptual`.
 - `not_verified`: the data or runtime was unavailable. The text should say what is missing.
+
+## How to write
+
+`answers.json`, `task_summaries` and the text cells print read as the student's own lab report.
+
+- Write as the student: plain, direct, at the course's level. Answer the question in the first sentence. Length
+  follows the question: one or two sentences for a simple one. Vary the shape; no template repeated per answer.
+- Stick to the lab's subject. The tool, the agent, "the student", identity fields, submission, Colab or runtime
+  details and how the answers were produced belong in chat, not in the document.
+- Sections only where the manual has them: no setup/environment or submission/deliverables section of your own.
+- Numbers the way a student writes them: 2-3 significant figures or the manual's precision (0.18 s, speedup 1.01).
+  Exact values only where the manual asks for them.
+- At most one short limitation, and only when the question asks for interpretation.
+- Formulas in plain text: "Speedup = 1.60 / 0.40 = 4". Word shows LaTeX (`\frac`, `$...$`) raw.
+- Accuracy wins: every number comes from the executed outputs, and style never changes a result.
+- Clean writing is the goal, not disguise: no deliberate typos or invented mistakes.
 
 ## Resume and inputs
 
