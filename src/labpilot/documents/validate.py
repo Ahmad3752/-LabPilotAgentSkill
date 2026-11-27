@@ -205,28 +205,24 @@ def render_pages(docx_path: Path, out_dir: Path, timeout: int = 240) -> dict[str
         return {"available": True, "ok": False, "reason": "renderer timed out"}
     if pdf is None:
         return {"available": True, "ok": False, "renderer": renderer, "reason": log}
-    result: dict[str, Any] = {"available": True, "ok": True, "renderer": renderer, "pdf": pdf.name}
+    import pypdfium2 as pdfium
+
+    from labpilot.evidence.validate import image_problems
+
+    pages_dir = out_dir / "pages"
+    pages_dir.mkdir(exist_ok=True)
+    for old in pages_dir.glob("page-*.png"):  # a shorter re-export must not leave stale pages behind
+        old.unlink()
+    doc = pdfium.PdfDocument(str(pdf))
+    pages = []
     try:
-        import pypdfium2 as pdfium
-
-        from labpilot.evidence.validate import image_problems
-
-        doc = pdfium.PdfDocument(str(pdf))
-        pages_dir = out_dir / "pages"
-        pages_dir.mkdir(exist_ok=True)
-        pages = []
         for i in range(len(doc)):
-            img = doc[i].render(scale=1.3).to_pil()
             dest = pages_dir / f"page-{i + 1:02d}.png"
-            img.save(dest)
+            doc[i].render(scale=1.3).to_pil().save(dest)
             probs, _, _ = image_problems(dest)
             pages.append({"page": i + 1, "png": f"pages/{dest.name}", "blank": bool(probs)})
+    finally:
         doc.close()
-        result["pages"] = len(pages)
-        result["page_images"] = pages
-        result["blank_pages"] = [p["page"] for p in pages if p["blank"]]
-    except ImportError:
-        data = pdf.read_bytes()
-        result["pages"] = data.count(b"/Type /Page") - data.count(b"/Type /Pages")
-        result["note"] = "install pypdfium2 to rasterize pages for visual review"
-    return result
+    return {"available": True, "ok": True, "renderer": renderer, "pdf": pdf.name, "pages": len(pages),
+            "pages_dir": str(pages_dir.resolve()), "page_images": pages,
+            "blank_pages": [p["page"] for p in pages if p["blank"]]}

@@ -97,14 +97,6 @@ def completion_checks(run: Run, plan: Plan) -> dict[str, dict[str, Any]]:
 # ------------------------------------------------------------------ export
 
 
-def run_label(run: Run) -> str:
-    """Short, accurate figure label: where the code ran (details live in execution_report.json)."""
-    executed_on = run.manifest.attempts[-1]["backend"] if run.manifest.attempts else (run.manifest.backend or "")
-    if executed_on.startswith("colab"):
-        return "run on Google Colab"
-    return "run in a local Jupyter kernel"
-
-
 def export(run: Run, render: bool = True) -> dict[str, Any]:
     plan = load_plan(run)
     m = run.manifest
@@ -133,7 +125,7 @@ def export(run: Run, render: bool = True) -> dict[str, Any]:
     docx_name = f"{stem}_{'Completed' if pre_ok else 'Partial'}.docx"
     out_docx = out_dir / docx_name
     report = write_document(source=_source_copy(run), out_path=out_docx, run_dir=run.dir, plan=plan, contents=contents,
-                            run_label=run_label(run), student=m.student,
+                            student=m.student,
                             student_fields=doc_info.get("student_fields", []),
                             table_fills=answers.table_cells if answers else [])
     structural = validate_docx(source=run.lab_dir / m.source_name, source_sha256=m.source_sha256, output=out_docx,
@@ -179,7 +171,7 @@ def export(run: Run, render: bool = True) -> dict[str, Any]:
     return {"run_id": run.id, "status": str(status), "output_dir": str(out_dir), "docx": out_docx.name,
             "notebook": nb_out.name, "screenshots": len(current_ev),
             "failed_checks": {k: v["detail"] for k, v in checks.items() if not v["ok"]},
-            "render_validation": rendered}
+            "pages_dir": rendered.get("pages_dir"), "render_validation": rendered}
 
 
 def validate_run(run: Run) -> dict[str, Any]:
@@ -567,7 +559,7 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
             else:
                 exp = export(run)
                 steps.append({"step": step, "status": "done", "result": exp["status"],
-                              "failed_checks": exp["failed_checks"]})
+                              "failed_checks": exp["failed_checks"], "pages_dir": exp["pages_dir"]})
     except LabPilotError as exc:
         if exc.exit_code == ExitCode.CANCELLED:
             raise
@@ -580,6 +572,7 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
     return {"run_id": rid, "verdict": str(m.state) if finished else "NOT_FINISHED", "steps": steps,
             "output_dir": m.outputs.get("dir") if finished else None,
             "docx": m.outputs.get("docx") if finished else None,
+            "pages_dir": m.validation.get("render", {}).get("pages_dir") if finished else None,
             "failed_checks": exported["failed_checks"] if exported else {},
             "runtime_release": m.backend_state.get("release_pending") or None,
             "next_action": stop or next_action(run)}

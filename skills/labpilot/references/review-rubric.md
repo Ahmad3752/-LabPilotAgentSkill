@@ -2,14 +2,15 @@
 
 Review the finished lab the way a strict lab engineer would. Use only:
 - the original manual (`inputs/` in the run folder), and any earlier manual it depends on
-- the rendered Word pages (`render/pages/page-*.png`)
+- the rendered Word pages (`page-*.png` in `pages_dir` from the `finish` JSON)
 - the executed notebook (`notebook/executed.ipynb`)
 
 Do not trust the author's summaries. For each item, report a problem only when you find concrete evidence: quote it and give its location.
 
 ## Coverage
 - Every task, part and question in the manual has an answer, in the right box and in the manual's order.
-- Sections the introduction promises (teardown, cleanup, deliverables, submission) are present.
+- Sections the introduction promises (teardown, cleanup) are present.
+- Reads like the student's own report: no LaTeX, rounded numbers, no tool wording (LabPilot, "the student", Colab runtime).
 - Every TODO in the starter code is completed. Every table the manual asks to fill is filled.
 - Things the manual asks to show (schemas, counts, plots, job counters, `ls` listings) are visible in the screenshots.
 

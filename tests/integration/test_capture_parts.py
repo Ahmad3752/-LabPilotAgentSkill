@@ -95,3 +95,28 @@ def test_tall_code_cell_is_captured_in_ordered_parts(tmp_path: Path) -> None:
     assert all(t.endswith("\n") for t in got["texts"][:-1])  # parts end on a line boundary
     lines = [ln for t in got["texts"] for ln in t.splitlines()]
     assert [ln.rstrip() for ln in lines] == LONG.splitlines()
+
+
+def test_long_stderr_lines_wrap_at_a_readable_width(tmp_path: Path) -> None:
+    """A 400-character warning line (with and without spaces) must not widen the crop until Word shrinks it."""
+    from labpilot.documents.write import CAPTURE_DPI, MIN_READABLE_SCALE
+
+    sources = {"nospace": "import sys\nprint('x' * 400, file=sys.stderr)\nprint('done')",
+               "spaces": "import sys\nprint(' '.join(['word'] * 80), file=sys.stderr)\nprint('done')"}
+    nb = nbformat.v4.new_notebook()
+    nb.cells = [nbformat.v4.new_code_cell(src) for src in sources.values()]
+    for cell, cid in zip(nb.cells, sources, strict=True):
+        cell["id"] = cid
+    NotebookClient(nb, timeout=120, kernel_name="python3").execute()
+    assert all(any(o.get("name") == "stderr" for o in c.outputs) for c in nb.cells)  # the real kernel's stderr
+    executed = tmp_path / "executed.ipynb"
+    nbformat.write(nb, str(executed))
+    res = capture_notebook(run_dir=tmp_path / "run", run_id="r", attempt_id="a001", executed_nb=executed,
+                           backend="local-jupyter", cells_to_capture=[_spec(c, s) for c, s in sources.items()],
+                           provenance="test rendering")
+    assert res.problems == []
+    a4_text_width_in = 8.27 - 2  # A4 with 1-inch margins, the narrowest common page
+    for r in res.records:
+        assert (r.kind, r.parts) == ("code-output", 1)
+        scale = min(1.0, a4_text_width_in / (r.width / CAPTURE_DPI))
+        assert scale >= MIN_READABLE_SCALE, f"{r.cell_ids}: fitted at {scale:.2f} of natural size"

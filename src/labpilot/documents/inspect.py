@@ -19,8 +19,8 @@ from docx.oxml.ns import qn
 from labpilot.documents.anchors import (
     W_P,
     W_TBL,
+    element_fingerprint,
     element_text,
-    fingerprint,
     iter_blocks,
     iter_cells,
     iter_rows,
@@ -57,6 +57,7 @@ PROMISED_SECTIONS = {
     "deliverables": r"\bdeliverables?\b",
     "submission": r"\bsubmission\b",
 }
+SOFT_PROMISES = {"deliverables", "submission"}  # usually the filled manual itself; teardown/cleanup are real lab steps
 # an explicit "Q1." / "Q2:" / "Q3)" label makes a question even without a "?" ("Q1. Modify the ..."); "Question 1:"
 # is left out because manuals use it for section titles ("Question 1: Working with HDFS")
 QUESTION_LABEL_RE = re.compile(r"^\s*Q\s*\d+\s*[:.)\-–—]", re.I)
@@ -89,6 +90,7 @@ STUDENT_RE = re.compile(
     re.I,
 )
 NATIVE_COLAB_RE = re.compile(r"screenshot[s]?\s+(of|from)\s+(google\s+)?colab|colab\s+screenshot", re.I)
+SETUP_RE = re.compile(r"\b(set\s*-?\s*up|install(ation|ing)?|environment|getting started)\b", re.I)  # setup heading
 
 
 @dataclass
@@ -189,7 +191,7 @@ def _walk(container: Any, prefix: str, depth: int, doc: Any, out: list[BlockInfo
             out.append(
                 BlockInfo(
                     anchor=anchor,
-                    fp=fingerprint(text),
+                    fp=element_fingerprint(block),
                     kind="paragraph",
                     depth=depth,
                     text=text,
@@ -206,7 +208,7 @@ def _walk(container: Any, prefix: str, depth: int, doc: Any, out: list[BlockInfo
             out.append(
                 BlockInfo(
                     anchor=anchor,
-                    fp=fingerprint(element_text(block)),
+                    fp=element_fingerprint(block),
                     kind="table",
                     depth=depth,
                     text=normalize(element_text(block))[:200],
@@ -221,7 +223,7 @@ def _walk(container: Any, prefix: str, depth: int, doc: Any, out: list[BlockInfo
                     out.append(
                         BlockInfo(
                             anchor=cell_anchor,
-                            fp=fingerprint(ctext),
+                            fp=element_fingerprint(tc),
                             kind="cell",
                             depth=depth + 1,
                             text=ctext,
@@ -487,6 +489,10 @@ def _analyse(insp: Inspection) -> None:
         if re.search(promise_re, intro) and not re.search(promise_re, covered):
             insp.uncovered_mentions.append(label)
             insp.warnings.append(
+                f"The introduction mentions '{label}' but no task covers it. The filled manual itself is normally "
+                "the deliverable: add a section only if the manual names extra content to hand in, written as "
+                "the student would write it (no notes about the tool or blank fields)."
+                if label in SOFT_PROMISES else
                 f"The introduction mentions '{label}' but no task covers it. If the lab expects it, add a closing "
                 "task with placement 'end' (it may live in an earlier lab's manual)."
             )
@@ -572,19 +578,28 @@ def draft_plan(insp: Inspection, required_files: list[dict[str, Any]]) -> dict[s
             box_by_unit.setdefault(box["unit_hint"], box["fill_anchor"])
         elif box["task_hint"]:
             box_by_task.setdefault(box["task_hint"], box["fill_anchor"])
-    prev: str | None = "SETUP"
-    tasks.append(
-        {
-            "id": "SETUP",
-            "title": "Environment setup and data loading",
-            "placement": "append",
-            "depends_on": [],
-            "instructions": ["Initialise the runtime, verify versions and confirm the staged input files."],
-            "observation_questions": [],
-            "required_evidence": ["code", "output"],
-            "cell_ids": [],
-        }
-    )
+    # a SETUP task only when the manual has its own setup section (its solution goes right after that section);
+    # otherwise imports and installs belong in the first task's first cell, not in an invented appendix
+    first_task = insp.tasks[0]["source_anchor"].split("#")[0] if insp.tasks else None
+    setup = next((b for b in insp.blocks if b.kind == "paragraph" and b.depth == 0
+                  and (b.heading_level or b.bold) and len(b.text) <= 60 and SETUP_RE.search(b.text)
+                  and (first_task is None or _anchor_before(b.anchor, first_task))), None)
+    prev: str | None = None
+    if setup is not None:
+        prev = "SETUP"
+        tasks.append(
+            {
+                "id": "SETUP",
+                "title": normalize(setup.text).rstrip(":"),
+                "source_anchor": f"{setup.anchor}#{setup.fp}",
+                "placement": "after_source",
+                "depends_on": [],
+                "instructions": ["Do what the manual's setup section asks (installs, imports, loading the files)."],
+                "observation_questions": [],
+                "required_evidence": ["code", "output"],
+                "cell_ids": [],
+            }
+        )
     for t in insp.tasks:
         units = t["parts"] or [t]
         for u in units:

@@ -32,6 +32,7 @@ W_SDT_CONTENT = qn("w:sdtContent")
 W_T = qn("w:t")
 W_TAB = qn("w:tab")
 W_BR = qn("w:br")
+M_T = "{http://schemas.openxmlformats.org/officeDocument/2006/math}t"  # Word equation (OMML) text
 
 _WS = re.compile(r"\s+")
 
@@ -44,11 +45,19 @@ def fingerprint(text: str) -> str:
     return hashlib.sha256(normalize(text).lower().encode("utf-8")).hexdigest()[:12]
 
 
-def element_text(el: Any) -> str:
-    """Visible text of a paragraph/cell/table element (tabs and breaks become spaces/newlines)."""
+def element_fingerprint(el: Any) -> str:
+    """Anchor fingerprint. Equation text is left out so anchors from runs inspected before it was read stay valid."""
+    return fingerprint(element_text(el, math=False))
+
+
+def element_text(el: Any, math: bool = True) -> str:
+    """Visible text of a paragraph/cell/table element (tabs and breaks become spaces/newlines).
+
+    Word equations are included as their plain characters (e.g. "S=T1/T4"), never as LaTeX.
+    """
     parts: list[str] = []
     for node in el.iter():
-        if node.tag == W_T and node.text:
+        if (node.tag == W_T or math and node.tag == M_T) and node.text:
             parts.append(node.text)
         elif node.tag == W_TAB:
             parts.append("\t")
@@ -126,7 +135,7 @@ def resolve(body: Any, anchor: str, *, check_fingerprint: bool = True) -> Any:
             i += 2
         else:  # pragma: no cover - guarded by parse_anchor
             raise LabPilotError(ErrorCode.ANCHOR_AMBIGUOUS, f"Malformed anchor '{anchor}'.")
-    if check_fingerprint and parsed.fingerprint and fingerprint(element_text(element)) != parsed.fingerprint:
+    if check_fingerprint and parsed.fingerprint and element_fingerprint(element) != parsed.fingerprint:
         raise LabPilotError(
             ErrorCode.ANCHOR_AMBIGUOUS,
             f"Anchor '{anchor}' text changed since inspection; re-run `labpilot inspect` and review the plan.",

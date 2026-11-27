@@ -11,7 +11,8 @@
 
 ## Word output
 - LabPilot always starts from the pristine original manual, so re-exports never duplicate content. The original file is never modified.
-- Inside each solution anchor it removes only placeholder text (for example "Paste your code here"). It then adds, for each part in order: a subheading, a short explanation, the screenshots (inline, sized to the cell width) and the Q&A.
+- Inside each solution anchor it removes only placeholder text (for example "Paste your code here"). It then adds, for each part in order: a subheading, an optional short summary paragraph, the screenshots (inline, sized to the cell width; captions
+  say "Figure N: Code and output", not where the code ran) and the Q&A.
 - Exact-height and can't-split table rows are relaxed so content can flow across pages. Every such change is listed in REVIEW.md.
 - If an anchor cannot be resolved reliably, the solution goes into a labelled appendix and the item is flagged for review. It is never pasted into an unrelated section.
 - The file is named `<Lab>_Completed.docx` only when every check passes:

@@ -110,11 +110,13 @@ never handle the LMS password.
    Post "Answers written (70%)".
 9. `labpilot finish <id> --answers answers.json --json`. It validates the answers, writes the Word copy and runs
    the quality review, skipping every step that is already current. If `verdict` is not COMPLETED, fix what
-   `failed_checks` lists: missing sections the introduction promises (add a task with `placement: "end"`), empty
-   tables, log-like answers, error text in outputs. Run `finish` again until it is COMPLETED or the remaining gap
+   `failed_checks` lists: a teardown/cleanup the introduction promises (add a task with `placement: "end"`), empty
+   tables, log-like answers, error text in outputs. Also fix every `writing` warning in `evaluation.json` (LaTeX,
+   unrounded numbers, tool wording). A deliverables/submission warning needs no section of its own. Run `finish` again until it is COMPLETED or the remaining gap
    genuinely needs the user. Post "Word report done (85%)".
-10. Independent review: re-read the manual and the rendered pages (`.labpilot/runs/<id>/render/pages/`) as a strict
-    lab engineer would, using [review-rubric.md](references/review-rubric.md). If your host supports sub-agents,
+10. Independent review: re-read the manual and the page images in `pages_dir` (from the `finish` JSON) as a strict
+    lab engineer would. Never install packages or write scripts to render pages; if `render_validation.available`
+    is false, review the Word file's text instead. Review using [review-rubric.md](references/review-rubric.md). If your host supports sub-agents,
     give that review to a fresh agent that did not write the solution. Fix what it finds, then run `finish` again.
     Post "Review passed (100%)".
 11. Tell the user in chat (never in the document): status (COMPLETED or PARTIAL), the Word file, notebook and REVIEW.md paths (`output_dir`), that the

@@ -208,7 +208,7 @@ def display_heading(t: Task) -> str:
     return f"{labels[0]}: {t.title}"
 
 
-def _write_task(sink: _Sink, run_dir: Path, content: TaskContent, avail: float, run_label: str, report: WriteReport) -> None:
+def _write_task(sink: _Sink, run_dir: Path, content: TaskContent, avail: float, report: WriteReport) -> None:
     t = content.task
     _heading(sink, display_heading(t))
     if content.status != "passed":
@@ -219,15 +219,15 @@ def _write_task(sink: _Sink, run_dir: Path, content: TaskContent, avail: float, 
             RGBColor(0xB0, 0x00, 0x00),
         )
     if content.explanation:
-        _text(sink, "What the code does:", content.explanation)
+        _text(sink, None, content.explanation)
     for rec in content.evidence:
         what = {"code-output": "Code and output", "code": "Code", "output": "Output"}[rec.kind]
-        part = "" if rec.parts <= 1 else f"{'continued, ' if rec.part > 1 else ''}part {rec.part} of {rec.parts}; "
+        part = "" if rec.parts <= 1 else f" ({'continued, ' if rec.part > 1 else ''}part {rec.part} of {rec.parts})"
         report.figure_count += 1
         # caption BELOW its image and kept on the same page, so a caption can never be stranded above the wrong figure
         info = _picture(sink, run_dir / rec.path, rec, avail, keep_with_next=True)
         report.inserted_images.append(info)
-        _label(sink, f"Figure {report.figure_count}: {what} ({part}{run_label})", keep_with_next=False)
+        _label(sink, f"Figure {report.figure_count}: {what}{part}", keep_with_next=False)
         if info.get("too_tall"):
             report.review_required.append(
                 f"Figure {report.figure_count} ({rec.path}) is too tall to read on one page; "
@@ -268,7 +268,6 @@ def write_document(
     run_dir: Path,
     plan: Plan,
     contents: list[TaskContent],
-    run_label: str,
     student: dict[str, str] | None = None,
     student_fields: list[dict[str, Any]] | None = None,
     table_fills: list[TableCellFill] | None = None,
@@ -337,20 +336,20 @@ def write_document(
             sink = _Sink(document, before=nxt) if nxt is not None and nxt.tag != qn("w:sectPr") else _Sink(document, before=body.find(qn("w:sectPr")))
             avail = page_w
         for content in items:
-            _write_task(sink, run_dir, content, avail, run_label, report)
+            _write_task(sink, run_dir, content, avail, report)
             report.placements.append({"task_id": content.task.id, "anchor": key, "mode": "anchor"})
 
     for content, before in after_source:
         if before is None:
             before = body.find(qn("w:sectPr"))
         sink = _Sink(document, before=before)
-        _write_task(sink, run_dir, content, page_w, run_label, report)
+        _write_task(sink, run_dir, content, page_w, report)
         report.placements.append({"task_id": content.task.id, "anchor": None, "mode": "after_source"})
 
     # closing sections the manual expects after the last task (e.g. cluster teardown), in plan order
     for content in at_end:
         sink = _Sink(document, before=body.find(qn("w:sectPr")))
-        _write_task(sink, run_dir, content, page_w, run_label, report)
+        _write_task(sink, run_dir, content, page_w, report)
         report.placements.append({"task_id": content.task.id, "anchor": None, "mode": "end"})
 
     if appended:
@@ -360,7 +359,7 @@ def write_document(
         p.add_run().add_break(WD_BREAK.PAGE)
         _heading(sink, plan.appendix_title, 13)
         for content in appended:
-            _write_task(sink, run_dir, content, page_w, run_label, report)
+            _write_task(sink, run_dir, content, page_w, report)
             report.placements.append({"task_id": content.task.id, "anchor": None, "mode": "append"})
 
     for el, label, value in student_targets:

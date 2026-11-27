@@ -15,7 +15,7 @@ The local Jupyter kernel exists only for LabPilot's own tests and offline demo. 
 |---|---|
 | `files.upload()` | Do not use it. LabPilot stages the files (it uploads them to `/content` in Colab), so load them by name, e.g. `pd.read_csv('sales.csv')`. |
 | `/content/...` paths | Use plain relative names. Colab's working directory is `/content`, so relative names work there. |
-| `!pip install ...` / `!apt-get ...` | Put them in the first setup cell exactly as the manual says. They run inside Colab. |
+| `!pip install ...` / `!apt-get ...` | Put them in the first cell (SETUP's if the manual has a setup section) exactly as the manual says. They run inside Colab. |
 | `drive.mount()` | Never mount Drive. Ask the user to place the files in the lab folder. |
 
 ## When to stop and ask the user

@@ -74,7 +74,7 @@ def test_answers_keep_label_and_table_cells_are_filled(tmp_path: Path) -> None:
     fills = [TableCellFill(anchor=empty[0], text="200000", source_cell_ids=["c"]),
              TableCellFill(anchor=empty[1], text="200000", source_cell_ids=["c"])]
     out = tmp_path / "o.docx"
-    rep = write_document(source=p, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run on Google Colab",
+    rep = write_document(source=p, out_path=out, run_dir=tmp_path, plan=plan, contents=contents,
                          table_fills=fills)
     assert rep.removed_placeholders == []  # "Your answer:" labels are kept
     assert len(rep.table_fills) == 2
@@ -102,14 +102,15 @@ def test_end_section_and_appendix_title(tmp_path: Path) -> None:
     p = _manual(tmp_path / "m.docx")
     insp = inspect_docx(p, sha256_file(p))
     data = draft_plan(insp, [])
+    assert "SETUP" not in [t["id"] for t in data["tasks"]]  # the manual has no setup section: no invented one
     data["appendix_title"] = "Appendix: Environment setup (re-run)"
     data["tasks"].append({"id": "TEARDOWN", "title": "Cluster teardown and deliverables", "placement": "end",
                           "depends_on": ["T3.2"], "required_evidence": []})
+    data["tasks"].append({"id": "SETUP", "title": "Setup", "placement": "append", "required_evidence": []})
     plan = Plan.model_validate(data)
     contents = [TaskContent(task=t, explanation="x", evidence=[], answers=[], status="passed") for t in plan.tasks]
     out = tmp_path / "o.docx"
-    rep = write_document(source=p, out_path=out, run_dir=tmp_path, plan=plan, contents=contents,
-                         run_label="run on Google Colab")
+    rep = write_document(source=p, out_path=out, run_dir=tmp_path, plan=plan, contents=contents)
     modes = {pl["task_id"]: pl["mode"] for pl in rep.placements}
     assert modes["TEARDOWN"] == "end" and modes["SETUP"] == "append"
     texts = [para.text for para in docx.Document(str(out)).paragraphs]

@@ -29,15 +29,15 @@ validates each one. Everything between them is one command, `labpilot finish` (b
 ```
 
 - `profile`: always `python` (Colab labs install anything else in their own `!pip` setup cell).
-- No `SETUP` task unless the manual has its own setup section. The draft plan adds one; delete it. An `append` task
-  becomes an "Environment setup" appendix in the Word copy.
+- A `SETUP` task exists only when the manual has its own setup section (the draft plan then adds it, placed after
+  that section). Otherwise imports and installs go in the first task's first cell.
 - `placement`:
   - `anchor`: insert inside `solution_anchor`, which is usually a solution-box cell from `document.json` `solution_boxes[].fill_anchor`.
   - `after_source`: insert after the task when the manual has no solution box.
   - `append`: add to an appendix.
 - Anchors must be copied exactly, including the `#fingerprint`. If the manual changes, its fingerprint no longer matches and LabPilot rejects the anchor rather than writing to the wrong place.
 - Question ids and task ids must be unique. `depends_on` may only point to earlier tasks.
-- `placement: "end"` adds a closing section after the last task, for example a cluster teardown that the introduction promises. `appendix_title` names the appendix that holds setup or unplaced work.
+- `placement: "end"` adds a closing section after the last task, for example a cluster teardown that the introduction promises. `appendix_title` names the appendix that holds unplaced work.
 - Every inspected task part must appear in the plan. If a part really doesn't apply, pass `--allow-uncovered` and explain why in `notes`.
 
 ## cells.json
