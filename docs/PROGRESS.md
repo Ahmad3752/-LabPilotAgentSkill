@@ -33,19 +33,20 @@ Last updated: 2026-11-27.
 
 ## Next steps (in order; proposed unless marked agreed)
 
-1. **Re-test Lab 2 in Codex with one prompt and time it** (agreed). Rerun `install.ps1` (or `labpilot setup --agent both --project-dir C:\Labs`) so the rules file and `C:\Labs\.codex\config.toml` are written, trust `C:\Labs` when Codex asks, then one prompt. Success = no user commands, `Lab_2_Completed.docx`, well under the first run's 35 minutes. This also verifies `labpilot finish` and the release check on real Colab.
-2. Speed: measure Colab per-cell overhead (each cell is a separate CLI call plus a marker call) on that run, then decide on batching.
-3. Grilling questions still open: is v1 done when a classmate on Windows gets a Completed lab from one prompt? Is the audience the user plus classmates via GitHub?
+1. **Re-test Lab 2 in Codex with one prompt and time it** (agreed). Note the Colab per-call time in `events.jsonl` (batching landed 2026-11-27). Rerun `install.ps1` (or `labpilot setup --agent both --project-dir C:\Labs`) so the rules file and `C:\Labs\.codex\config.toml` are written, trust `C:\Labs` when Codex asks, then one prompt. Success = no user commands, `Lab_2_Completed.docx`, well under the first run's 35 minutes. This also verifies `labpilot finish` and the release check on real Colab.
+2. Grilling questions still open: is v1 done when a classmate on Windows gets a Completed lab from one prompt? Is the audience the user plus classmates via GitHub?
 
 ## Machine gotchas (this Windows 11 PC)
 
-- Tests: the default temp dir is blocked. Pass `--basetemp <scratch dir>` to pytest. Expect about 147 passed and 2 skipped (opt-in Colab, symlinks).
+- Tests: the default temp dir is blocked. Pass `--basetemp <scratch dir>` to pytest. Expect about 177 passed and 2 skipped (opt-in Colab, symlinks).
 - Smart App Control blocks unsigned `.exe` launchers, so `moodle-mcp` runs as `"%APPDATA%\uv\tools\nutslms-mcp\Scripts\python.exe" -m moodle_mcp`.
 - The Colab CLI 0.8.0 is installed in a LabPilot-owned venv and signed in. `labpilot doctor --json` shows it.
 - `gh` is not installed, so pull requests are opened in the browser.
 - `docs/INTERVIEW_PREP.md` is the user's personal interview prep. It is deliberately left uncommitted.
 
 ## Session log (newest first; keep the last five)
+
+- **2026-11-27:** Faster Colab runs and visible progress. Measured on real Colab: each `colab exec` call costs ~4-14 s of fixed overhead (it varied between runs), while quick cells run in ~1 s, and every cell used two calls (the cell, then the `_labpilot_marker` cell). `colab exec` keeps going after a cell raises (read from the 0.8.0 source and confirmed), so batching needed a kernel-side guard: chosen design is up to 5 unchanged lab cells per call with a LabPilot control cell between them that reports each outcome, sets the marker only after a pass, and installs an IPython input transformer that blanks every cell after a failure (so state is untouched before the repair). Each control cell also `chdir`s to /content, as the one-call-per-cell flow did. Rejected: wrapping cells in `run_cell` from one control cell (changes outputs and tracebacks) and one call for all cells (no progress for minutes). Timings, same benchmark minutes apart: 19 quick cells 139.4 s / 38 calls before, 33.0 s / 4 calls after; a cell failing mid-batch gave identical records and kernel state. Sample lab on Colab: execute phase 43.9 s before, 28 s after (in a slower Colab period: ~13 s per call). Progress lines: `Colab: 7/19 cells done (36%) - <cell> passed` and `Step n/6: ...` from `finish`.
 
 - **2026-11-27:** After the Codex Lab 3 run (asked mid-work, waited at CONSENT_REQUIRED, blank name/ID, bot-like text): the skill now asks once at discovery (yes + name + CMS ID), ends its turn, then runs to the end with percentage status lines; `init` saves the name/ID locally and `doctor --json` reports them; the skill has *How to write* rules and drops the draft plan's SETUP appendix. Not yet tried in a real run.
 
@@ -54,6 +55,3 @@ Last updated: 2026-11-27.
 - **2026-11-27:** First real Codex run (Lab 2) worked but took 35 minutes and 5 user commands, because Codex's sandbox could not start LabPilot and the agent improvised runners. Fixed in four parallel branches: Codex/Claude agent access (rules file, approval mode, doctor check, "never improvise" in the skill); Colab-only execution and `labpilot finish`; manual parsing (activities, Q-labelled questions, generated files, headings, SQL Server blocker, `needs_attention`); long code split into screenshot parts.
 
 - **2026-11-27:** One-command install: `labpilot lms connect` (install, moodle-mcp's own login prompt, registration with Codex and Claude Code at user scope) and `install.ps1` now runs `colab-login`, `lms connect` and starts the agent with the first prompt. Doctor's LMS line says which agents are connected. The full one-command run on a clean PC is not verified yet.
-
-- **2026-11-27:** The LMS is now the main way to start a lab in the README ("any new labs?" → pick one → fetch → Colab check → solve). `doctor` prints the LMS registration for Codex and Claude with real paths (the `~` redaction is fixed), a valid PowerShell login command (`& "…python.exe"`), and finds `moodle-mcp` even when uv's bin is not on PATH. Naming a lab ("do Lab 1") uses `--include-past`.
-

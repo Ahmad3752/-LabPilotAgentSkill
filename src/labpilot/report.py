@@ -457,17 +457,24 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
     stop: dict[str, str] | None = None
     ran = False  # a step changed the run in this call, so later outputs are no longer current
     step = "build-notebook"
+
+    def say(n: int, text: str) -> None:  # progress on stderr; the JSON result stays on stdout
+        run.event("progress", message=f"Step {n}/6: {text}")
+
     try:
         if cells_file:
+            say(1, "building the notebook")
             res = build(run, cells_file)
             steps.append({"step": step, "status": "done", "changed_cells": res["changed_cells"]})
             ran = bool(res["changed_cells"])
         elif run.source_notebook.exists():
+            say(1, "notebook already built (skipped)")
             steps.append({"step": step, "status": "skipped", "reason": "notebook already built"})
         else:
             raise LabPilotError(ErrorCode.INVALID_STATE, "No notebook yet.",
                                 next_action=f"labpilot finish {rid} --cells cells.json")
         step = "revalidate-inputs"
+        say(2, "checking the input files")
         recovered = _recover(run)
         steps += [{**r, "status": "done"} for r in recovered]
         ran = ran or any(r["result"] for r in recovered)
@@ -482,11 +489,13 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
                     "detail": f"Run the cells in host_actions.json via colab-mcp, then `labpilot record-execution {rid} "
                               "--file result.json`, then `labpilot finish` again."}
         elif [c for c in failed if c not in transient] and not todo:
+            say(3, "the failing cells are unchanged, so nothing is run (skipped)")
             steps.append({"step": step, "status": "failed", "failed_cells": failed})
             stop = {"actor": "agent", "action": "repair",
                     "detail": f"Fix the failing cells {failed} (tracebacks: `labpilot status {rid} --json`), then "
                               f"`labpilot finish {rid} --cells cells.json`."}
         elif todo or failed:
+            say(3, "running the cells on " + ("the local kernel" if (backend or m.backend) == "local" else "Colab"))
             step = "preflight"
             pf = preflight(run, backend or m.backend or "auto", allow_cloud, allow_upload)
             bad = [c for c in pf["preflight"]["checks"] if not c["ok"] and c.get("required", True)]
@@ -514,6 +523,7 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
                             "detail": "Fix the failing cells using `failed[].traceback_tail`, then "
                                       f"`labpilot finish {rid} --cells cells.json`."}
         else:
+            say(3, "every cell already passed with the current code (skipped)")
             steps.append({"step": step, "status": "skipped", "reason": "every runnable cell passed with the current code"})
 
         step = "capture"
@@ -522,8 +532,10 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
             em = run.dir / "evidence" / "evidence_manifest.json"
             if ev and not ran and all(e.attempt_id == m.current_attempt for e in ev):
                 problems = read_json(em).get("capture_problems", []) if em.exists() else []
+                say(4, "screenshots already match the current run (skipped)")
                 steps.append({"step": step, "status": "skipped", "reason": "screenshots match the current attempt"})
             else:
+                say(4, "taking screenshots of the outputs")
                 cap = capture(run)
                 ran = True
                 problems = cap["problems"]
@@ -536,6 +548,7 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
 
         step = "answers"
         if stop is None:
+            say(5, "checking the answers")
             if answers_file:
                 res = save_answers(run, answers_file)
                 ran = True
@@ -555,8 +568,10 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
         if stop is None:
             out = m.outputs
             if not ran and m.state == RunState.COMPLETED and out.get("docx") and Path(out["dir"], out["docx"]).exists():
+                say(6, "already exported as COMPLETED (skipped)")
                 steps.append({"step": step, "status": "skipped", "reason": "already exported as COMPLETED"})
             else:
+                say(6, "filling the Word copy and checking it")
                 exp = export(run)
                 steps.append({"step": step, "status": "done", "result": exp["status"],
                               "failed_checks": exp["failed_checks"], "pages_dir": exp["pages_dir"]})

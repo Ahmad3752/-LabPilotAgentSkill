@@ -223,17 +223,7 @@ class Run:
             fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
             fh.flush()
         if os.environ.get("LABPILOT_PROGRESS", "1") != "0" and kind in {"state", "progress", "cell"}:
-            msg = fields.get("message") or fields.get("state") or ""
-            cell = fields.get("cell_id")
-            status = fields.get("status")
-            parts = [f"[labpilot {record['ts'][11:19]}]", kind]
-            if cell:
-                parts.append(str(cell))
-            if status:
-                parts.append(str(status))
-            if msg:
-                parts.append(str(msg))
-            print(" ".join(parts), file=sys.stderr, flush=True)
+            print(progress_line(record["ts"], kind, fields), file=sys.stderr, flush=True)
 
     # lock ---------------------------------------------------------------
     @contextlib.contextmanager
@@ -263,6 +253,21 @@ class Run:
         finally:
             with contextlib.suppress(OSError):
                 lock_path.unlink()
+
+
+def progress_line(ts: str, kind: str, fields: dict[str, Any]) -> str:
+    """One stderr progress line, e.g. `[labpilot 14:41:47] Colab: 7/19 cells done (37%) - load-data passed`."""
+    head = f"[labpilot {ts[11:19]}]"
+    msg = fields.get("message") or fields.get("state") or ""
+    if kind == "cell" and fields.get("total"):
+        done, total = fields.get("done", 0), fields["total"]
+        line = (f"{head} {fields.get('where', 'Run')}: {done}/{total} cells done ({done * 100 // total}%) - "
+                f"{fields.get('cell_id')} {fields.get('status', '')}")
+        return f"{line} {msg}".rstrip()
+    if kind == "progress":
+        return f"{head} {msg}"
+    parts = [head, kind, *(str(fields[k]) for k in ("cell_id", "status") if fields.get(k))]
+    return " ".join([*parts, str(msg)] if msg else parts)
 
 
 def _read_lock(path: Path) -> dict[str, Any] | None:

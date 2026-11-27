@@ -50,3 +50,29 @@ def cli(folder: Path, *args: str) -> dict[str, Any]:
     data["_exit"] = proc.returncode
     data["_stderr"] = proc.stderr
     return data
+
+
+def fake_colab_exec(path: Path, outputs_for: Any) -> list[str]:
+    """FAKE `colab exec -f path` for unit tests: writes <stem>_output.ipynb like google-colab-cli 0.8.0.
+
+    It also imitates LabPilot's kernel-side gate (the real gate runs in IPython, see
+    tests/integration/test_colab_gate.py): after a lab cell with an error output, later lab cells get
+    no outputs. `outputs_for(cell)` gives a cell's outputs; returns the ids of the lab cells it "ran".
+    """
+    import nbformat
+    from nbformat.v4 import new_output
+
+    nb = nbformat.read(str(path), as_version=4)
+    outcome, ran = "open", []
+    for cell in nb.cells:
+        if "_labpilot_control(" in cell.source:
+            outs = [{"output_type": "stream", "name": "stdout", "text": f"LABPILOT_GATE {outcome} 2026-01-01T00:00:00.000000Z\n"}]
+        elif outcome in ("failed", "skipped"):
+            outs, outcome = [], "skipped"
+        else:
+            outs = outputs_for(cell)
+            ran.append(cell.id)
+            outcome = "failed" if any(o["output_type"] == "error" for o in outs) else "passed"
+        cell.outputs = [new_output(**o) for o in outs]
+    nbformat.write(nb, str(path.with_name(path.stem + "_output.ipynb")))
+    return ran

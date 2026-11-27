@@ -15,10 +15,9 @@ from typing import Any
 
 import nbformat
 import pytest
-from nbformat.v4 import new_output
 from PIL import Image, ImageDraw
 
-from conftest import load_example
+from conftest import fake_colab_exec, load_example
 from labpilot.adapters import colab_cli
 from labpilot.errors import ErrorCode, LabPilotError
 from labpilot.evidence.manifest import load_evidence
@@ -48,22 +47,21 @@ class FakeColab:
             self.uploaded[args[5]] = hashlib.sha256(Path(args[4]).read_bytes()).hexdigest()
         if sub == "exec":
             path = Path(args[args.index("-f") + 1])
-            nb = nbformat.read(str(path), as_version=4)
-            cell = nb.cells[0]
-            if cell.id == "verify-upload":
-                outs = [{"output_type": "stream", "name": "stdout",
-                         "text": "LABPILOT_HASHES " + json.dumps(self.uploaded) + "\n"}]
-            elif cell.id in self.errors:
-                outs = [{"output_type": "error", "ename": "ValueError", "evalue": self.errors[cell.id],
-                         "traceback": ["ValueError: " + self.errors[cell.id]]}]
-            else:
-                outs = [{"output_type": "stream", "name": "stdout", "text": f"output of {cell.id}\n"}]
-                if "plt." in cell.source:  # a chart cell shows a (fake) figure
-                    outs.append({"output_type": "display_data", "data": {"image/png": _png()}})
-            cell.outputs = [new_output(**o) for o in outs]
-            assert cell.execution_count is None  # what the real CLI reports
-            nbformat.write(nb, str(path.with_name(path.stem + "_output.ipynb")))
+            fake_colab_exec(path, self._outputs)
+            out = nbformat.read(str(path.with_name(path.stem + "_output.ipynb")), as_version=4)
+            assert all(c.execution_count is None for c in out.cells)  # what the real CLI reports
         return CmdResult(0, "", "")
+
+    def _outputs(self, cell: Any) -> list[dict[str, Any]]:
+        if cell.id == "verify-upload":
+            return [{"output_type": "stream", "name": "stdout", "text": "LABPILOT_HASHES " + json.dumps(self.uploaded) + "\n"}]
+        if cell.id in self.errors:
+            return [{"output_type": "error", "ename": "ValueError", "evalue": self.errors[cell.id],
+                     "traceback": ["ValueError: " + self.errors[cell.id]]}]
+        outs = [{"output_type": "stream", "name": "stdout", "text": f"output of {cell.id}\n"}]
+        if "plt." in cell.source:  # a chart cell shows a (fake) figure
+            outs.append({"output_type": "display_data", "data": {"image/png": _png()}})
+        return outs
 
     def execs(self) -> int:
         return sum(1 for c in self.calls if c[1] == "exec")
@@ -210,3 +208,40 @@ def test_stop_keeps_ownership_until_release_is_confirmed(tmp_path: Path, colab_o
     assert be.cancel(run) is True  # retry
     assert state["owned_sessions"] == [] and "release_pending" not in state and "session" not in state
     assert [c for c in fake.calls if c[1] == "stop"] == [["colab", "stop", "-s", session]] * 2
+
+
+def test_finish_prints_steps_and_cell_progress_on_stderr_only(tmp_path: Path, colab_only: None,
+                                                               monkeypatch: pytest.MonkeyPatch,
+                                                               capsys: pytest.CaptureFixture[str]) -> None:
+    run, folder = _lab_run(tmp_path)
+    _fake(monkeypatch, FakeColab())
+    monkeypatch.setenv("LABPILOT_PROGRESS", "1")
+    capsys.readouterr()
+    finish(run, cells_file=folder / "cells.json", allow_cloud=True, allow_upload=True)
+    out, err = capsys.readouterr()
+    assert out == ""  # stdout is reserved for the JSON result
+    steps = [line.split("] ", 1)[1] for line in err.splitlines() if "] Step " in line]
+    assert steps == ["Step 1/6: building the notebook", "Step 2/6: checking the input files",
+                     "Step 3/6: running the cells on Colab", "Step 4/6: taking screenshots of the outputs",
+                     "Step 5/6: checking the answers"]
+    total = len(run.manifest.cell_status)
+    done = [line for line in err.splitlines() if "cells done" in line and line.endswith("passed")]
+    assert len(done) == total
+    assert done[-1].split("] ", 1)[1].startswith(f"Colab: {total}/{total} cells done (100%) - ")
+    finish(run)  # nothing changed: every step says it was skipped instead of claiming to run
+    assert [line.split("] ", 1)[1] for line in capsys.readouterr().err.splitlines() if "] Step " in line][:4] == [
+        "Step 1/6: notebook already built (skipped)", "Step 2/6: checking the input files",
+        "Step 3/6: every cell already passed with the current code (skipped)",
+        "Step 4/6: screenshots already match the current run (skipped)"]
+
+
+def test_progress_line_formats() -> None:
+    from labpilot.workspace import progress_line
+
+    ts = "2026-11-27T14:41:47.123456Z"
+    assert progress_line(ts, "cell", {"cell_id": "benchmark-million", "status": "passed", "done": 7, "total": 19,
+                                      "where": "Colab", "message": ""}) == \
+        "[labpilot 14:41:47] Colab: 7/19 cells done (36%) - benchmark-million passed"
+    assert progress_line(ts, "progress", {"message": "Step 3/6: running the cells on Colab"}) == \
+        "[labpilot 14:41:47] Step 3/6: running the cells on Colab"
+    assert progress_line(ts, "state", {"state": "EXECUTING", "note": "x"}) == "[labpilot 14:41:47] state EXECUTING"
