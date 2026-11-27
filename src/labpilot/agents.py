@@ -11,6 +11,7 @@ ownership marker with a content hash, so `doctor` can detect drift and
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import shutil
@@ -135,3 +136,206 @@ def unregister_colab_mcp(entry: dict[str, Any]) -> dict[str, Any]:
         return {"removed": False, "reason": "not registered by LabPilot"}
     res = run_cmd(["claude", "mcp", "remove", "-s", entry.get("scope", "user"), "colab-mcp"], timeout=60)
     return {"removed": res.ok, "detail": (res.stdout + res.stderr).strip()[-300:]}
+
+
+# ---------------------------------------------------------------- letting the agent run `labpilot`
+# Codex on Windows runs commands as a sandbox user that cannot read per-user installs (Python, LabPilot's venv,
+# the Colab sign-in). A Codex rule with decision "allow" runs matching commands outside the sandbox without a
+# prompt, but only for escalation requests, which Codex raises only under approval_policy "on-request".
+RULES_HEADER = "# Owned by LabPilot"
+CODEX_APPROVAL = {"approval_policy": "on-request", "approvals_reviewer": "auto_review"}
+PERMISSIONS_HINT = 'in Codex type /permissions and pick "Approve for me"'
+
+
+def labpilot_cli() -> list[str]:
+    return [sys.executable, "-m", "labpilot"]
+
+
+def codex_rules_path() -> Path:
+    return Path.home() / ".codex" / "rules" / "labpilot.rules"
+
+
+def codex_rules_text(cli: list[str]) -> str:
+    # json.dumps writes valid Starlark string literals (a bare Windows backslash breaks the rules parser)
+    rules = "".join(f'prefix_rule(pattern = {json.dumps(p, ensure_ascii=False)}, decision = "allow")\n'
+                    for p in (["labpilot"], cli))
+    return (f"{RULES_HEADER}: lets the agent run the `labpilot` CLI as you (outside the Codex sandbox), because it\n"
+            "# needs your own Python, Colab sign-in and screenshot browser. Remove with `labpilot uninstall`.\n" + rules)
+
+
+def _owned_rules(path: Path) -> bool:
+    return path.exists() and path.read_text(encoding="utf-8").startswith(RULES_HEADER)
+
+
+def _claude_allow(cli: list[str]) -> list[str]:
+    return [f"{tool}({cmd} *)" for cmd in ("labpilot", " ".join(cli)) for tool in ("Bash", "PowerShell")]
+
+
+def _codex_config_path(project_dir: Path) -> Path:
+    return project_dir.resolve() / ".codex" / "config.toml"
+
+
+def _claude_settings_path(project_dir: Path) -> Path:
+    return project_dir.resolve() / ".claude" / "settings.json"
+
+
+def _read_toml(path: Path) -> dict[str, Any]:
+    import tomllib
+
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except tomllib.TOMLDecodeError as exc:
+        raise LabPilotError(ErrorCode.IO_ERROR, f"{path} is not valid TOML: {exc}", exit_code=ExitCode.CONFIG,
+                            next_action="Fix or remove that file, then rerun labpilot setup.") from exc
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except json.JSONDecodeError as exc:
+        raise LabPilotError(ErrorCode.IO_ERROR, f"{path} is not valid JSON: {exc}", exit_code=ExitCode.CONFIG,
+                            next_action="Fix or remove that file, then rerun labpilot setup.") from exc
+    if not isinstance(data, dict):
+        raise LabPilotError(ErrorCode.IO_ERROR, f"{path} is not a JSON object.", exit_code=ExitCode.CONFIG)
+    return data
+
+
+def _add_toml_keys(path: Path, keys: dict[str, str]) -> list[str]:
+    """Add top-level keys the file lacks (never changes a value already there); returns the exact lines added."""
+    have = _read_toml(path)
+    lines = [f"{k} = {json.dumps(v)}" for k, v in keys.items() if k not in have]
+    if lines:
+        text = path.read_text(encoding="utf-8") if path.exists() else ""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n" + text, encoding="utf-8")  # top-level keys must precede any [table]
+    return lines
+
+
+def _add_allow(path: Path, rules: list[str]) -> list[str]:
+    data = _read_json(path)
+    allow = data.setdefault("permissions", {}).setdefault("allow", [])
+    added = [r for r in rules if r not in allow]
+    if added:
+        allow.extend(added)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return added
+
+
+def _remove_added(entry: dict[str, Any]) -> None:
+    """Undo exactly what setup added to one file; delete the file (and its folder) if nothing else is left."""
+    path, added = Path(entry["path"]), set(entry["added"])
+    if not path.exists():
+        return
+    if path.suffix == ".json":
+        data = _read_json(path)
+        perms = data.get("permissions", {})
+        perms["allow"] = [r for r in perms.get("allow", []) if r not in added]
+        for key, holder in (("allow", perms), ("permissions", data)):
+            if not holder.get(key):
+                holder.pop(key, None)
+        left = json.dumps(data, indent=2) + "\n" if data else ""
+    else:
+        kept = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln not in added]
+        left = "\n".join(kept) + "\n" if any(ln.strip() for ln in kept) else ""
+    if left:
+        path.write_text(left, encoding="utf-8")
+        return
+    path.unlink()
+    with contextlib.suppress(OSError):
+        path.parent.rmdir()  # only succeeds when the folder is empty
+
+
+def grant_agent_access(agent: str, project_dir: Path, cfg: dict[str, Any]) -> dict[str, Any]:
+    """Let Codex / Claude Code run this installation's CLI without prompts; records what it adds in `cfg`."""
+    cli, out = labpilot_cli(), {}
+    entries: list[dict[str, Any]] = []
+    if agent in ("codex", "both"):
+        rules = codex_rules_path()
+        if rules.exists() and not _owned_rules(rules):
+            rules_res: dict[str, Any] = {"path": str(rules), "written": False,
+                                         "reason": "exists and was not created by LabPilot; left untouched"}
+        else:
+            rules.parent.mkdir(parents=True, exist_ok=True)
+            rules.write_text(codex_rules_text(cli), encoding="utf-8")
+            rules_res = {"path": str(rules), "written": True}
+        conf = _codex_config_path(project_dir)
+        entries.append({"agent": "codex", "path": str(conf), "added": _add_toml_keys(conf, CODEX_APPROVAL)})
+        out["codex"] = {"rules": rules_res, "config": entries[-1]}
+    if agent in ("claude", "both"):
+        settings = _claude_settings_path(project_dir)
+        entries.append({"agent": "claude", "path": str(settings), "added": _add_allow(settings, _claude_allow(cli))})
+        out["claude"] = {"settings": entries[-1]}
+    owned = cfg.setdefault("agent_access", [])
+    for e in entries:
+        prev = next((o for o in owned if o["path"] == e["path"]), None)
+        if prev is None:
+            owned.append({**e, "added": list(e["added"])})
+        else:  # a rerun adds nothing new; keep what earlier runs added
+            prev["added"] += [a for a in e["added"] if a not in prev["added"]]
+    cfg["agent_access"] = [o for o in owned if o["added"]]
+    return out
+
+
+def revoke_agent_access(agent: str, project_dir: Path, cfg: dict[str, Any]) -> dict[str, Any]:
+    """Remove the LabPilot-owned Codex rules file and exactly the settings setup added under `project_dir`."""
+    agents = {"codex", "claude"} if agent == "both" else {agent}
+    out: dict[str, Any] = {"removed": []}
+    if "codex" in agents:
+        rules = codex_rules_path()
+        out["codex_rules"] = {"path": str(rules), "removed": _owned_rules(rules)}
+        if out["codex_rules"]["removed"]:
+            rules.unlink()
+    root, keep = project_dir.resolve(), []
+    for e in cfg.get("agent_access", []):
+        if e["agent"] in agents and Path(e["path"]).is_relative_to(root):
+            _remove_added(e)
+            out["removed"].append(e)
+        else:
+            keep.append(e)
+    cfg["agent_access"] = keep
+    return out
+
+
+def _trusted(project_dir: Path, user_cfg: dict[str, Any]) -> bool:
+    import os
+
+    trusted = {os.path.normcase(os.path.normpath(k)) for k, v in (user_cfg.get("projects") or {}).items()
+               if isinstance(v, dict) and v.get("trust_level") == "trusted"}
+    here = project_dir.resolve()
+    return any(os.path.normcase(str(p)) in trusted for p in (here, *here.parents))
+
+
+def agent_access_status(project_dir: Path) -> dict[str, Any]:
+    """Read-only: can Codex / Claude Code run this installation's `labpilot` without a sandbox failure or prompt?"""
+    cli = labpilot_cli()
+    rules = codex_rules_path()
+    rules_ok = rules.exists() and rules.read_text(encoding="utf-8") == codex_rules_text(cli)
+    error = None
+    try:
+        user_cfg = _read_toml(Path.home() / ".codex" / "config.toml")
+        proj_cfg = _read_toml(_codex_config_path(project_dir))
+    except LabPilotError as exc:
+        user_cfg, proj_cfg, error = {}, {}, exc.message
+    trusted = _trusted(project_dir, user_cfg)
+    layers = [proj_cfg, user_cfg] if trusted else [user_cfg]  # Codex reads project .codex/ only for trusted folders
+    policy = next((c["approval_policy"] for c in layers if "approval_policy" in c), None)
+    reviewer = next((c["approvals_reviewer"] for c in layers if "approvals_reviewer" in c), None)
+    setup = f'run `labpilot setup --agent codex --project-dir "{project_dir}"`'
+    fix = None
+    if not rules_ok:
+        fix = f"{setup} (LabPilot's Codex rules file is missing or was written for another installation)"
+    elif policy != "on-request":
+        fix = (f"open Codex in {project_dir} and trust the folder (Codex reads its .codex/config.toml only then)"
+               if "approval_policy" in proj_cfg and not trusted else setup) + f", or {PERMISSIONS_HINT}"
+    codex = {"rules_file": str(rules), "rules_ok": rules_ok, "project_trusted": trusted, "approval_policy": policy,
+             "approvals_reviewer": reviewer, "ok": rules_ok and policy == "on-request", "fix": fix, "error": error,
+             "note": f"A mode saved in Codex can override config: if labpilot is still refused, {PERMISSIONS_HINT}."}
+    try:
+        allow = _read_json(_claude_settings_path(project_dir)).get("permissions", {}).get("allow", [])
+    except LabPilotError:
+        allow = []
+    claude_ok = all(r in allow for r in _claude_allow(cli))
+    claude = {"settings": str(_claude_settings_path(project_dir)), "ok": claude_ok,
+              "fix": None if claude_ok else f'run `labpilot setup --agent claude --project-dir "{project_dir}"`'}
+    return {"cli": cli, "codex": codex, "claude": claude}

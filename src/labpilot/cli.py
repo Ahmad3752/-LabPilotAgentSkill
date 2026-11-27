@@ -125,6 +125,9 @@ def doctor(json_out: bool = JSON_OPT, project_dir: Path = typer.Option(Path.cwd,
             if s.get("installed"):
                 lines.append(f"{mark(s.get('in_sync', True))}skill {k}: {s['path']}"
                              + ("" if s.get("owned", True) else " (not LabPilot-owned)"))
+        for a, acc in r["agent_access"].items():
+            if a in ("codex", "claude") and r["agents"][a]["available"]:
+                lines.append(f"{mark(acc['ok'])}agent can run labpilot ({a})" + (f": {acc['fix']}" if acc["fix"] else ""))
         lines.append(f"{mark(r['browser']['available'])}headless Chromium: {r['browser'].get('chromium') or r['browser'].get('fix')}")
         lines.append(f"{mark(r['local_kernel']['available'])}local Jupyter kernel")
         cc = r["colab_cli"]
@@ -156,7 +159,7 @@ def setup(
     json_out: bool = JSON_OPT,
 ) -> None:
     """Install the LabPilot skill for your agent and record backend preferences (rerunnable, no duplicates)."""
-    from labpilot.agents import install_skill, register_colab_mcp, skill_targets
+    from labpilot.agents import grant_agent_access, install_skill, register_colab_mcp, skill_targets
     from labpilot.config import load_config, save_config
 
     def do() -> dict[str, Any]:
@@ -174,6 +177,7 @@ def setup(
         cfg["backend"] = backend
         cfg["agents"] = sorted(set(cfg.get("agents", [])) | ({"codex", "claude"} if agent == "both" else {agent}))
         cfg["installed_skills"] = sorted(set(cfg.get("installed_skills", [])) | {i["path"] for i in installed})
+        access = grant_agent_access(agent, Path(project_dir), cfg)
         mcp = None
         if register_mcp:
             mcp = [register_colab_mcp(a) for a in (["codex", "claude"] if agent == "both" else [agent])]
@@ -190,10 +194,15 @@ def setup(
                          "(verified on Windows 11 with CLI 0.8.0). If it misbehaves, report it and use --backend local.")
         if colab:
             notes.append(colab["next"])
+        if "codex" in access:
+            notes.append(f"Codex: LabPilot's rule ({access['codex']['rules']['path']}) lets the agent run labpilot "
+                         f"without a prompt. {project_dir} asks Codex for approval mode on-request (\"Approve for me\"); "
+                         "Codex applies it once you trust the folder. If labpilot is still refused, type /permissions "
+                         "in Codex and pick \"Approve for me\".")
         if backend == "colab-mcp" and not register_mcp:
             notes.append("colab-mcp needs registration in Claude Code: rerun with --register-mcp --agent claude.")
         return {"skills": installed, "config": str(path), "backend": backend, "colab_cli": colab, "mcp": mcp,
-                "notes": notes}
+                "agent_access": access, "notes": notes}
 
     _run(do, json_out)
 
@@ -217,18 +226,19 @@ def uninstall(
     project_dir: Path = typer.Option(Path.cwd, "--project-dir"),  # noqa: B008
     json_out: bool = JSON_OPT,
 ) -> None:
-    """Remove LabPilot-owned skill copies and MCP entries only."""
-    from labpilot.agents import skill_targets, uninstall_skill, unregister_colab_mcp
+    """Remove LabPilot-owned skill copies, agent permission entries and MCP entries only."""
+    from labpilot.agents import revoke_agent_access, skill_targets, uninstall_skill, unregister_colab_mcp
     from labpilot.config import load_config, save_config
 
     def do() -> dict[str, Any]:
         cfg = load_config()
         removed = [uninstall_skill(t) for t in skill_targets(agent, scope, Path(project_dir))]
         cfg["installed_skills"] = [p for p in cfg.get("installed_skills", []) if not any(r["path"] == p and r["removed"] for r in removed)]
+        access = revoke_agent_access(agent, Path(project_dir), cfg)
         mcp = [unregister_colab_mcp(e) for e in cfg.get("registered_mcp", [])]
         cfg["registered_mcp"] = []
         save_config(cfg)
-        return {"skills": removed, "mcp": mcp}
+        return {"skills": removed, "agent_access": access, "mcp": mcp}
 
     _run(do, json_out)
 
