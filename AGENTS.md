@@ -4,6 +4,7 @@ This file is for coding agents that change LabPilot's own code. To *use* LabPilo
 
 - **Spec:** `COMPLETE.md` is the implementation contract.
 - **Status:** `docs/IMPLEMENTATION_STATUS.md` is the source of truth for what is verified and what is not. Update it whenever you verify or change a capability. README claims must match it.
+- **Handoff:** read `docs/PROGRESS.md` at session start: it holds settled decisions, items waiting on something, and the next steps. Update it in the same commit as each completed step.
 
 ## Layout
 | Area | Where |
