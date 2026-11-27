@@ -10,10 +10,11 @@
 | INPUT_CHANGED | The manual or a dataset changed after staging. | Run `resume` to re-stage. If the manual changed, start a new run with `init`. |
 | RETRY_BUDGET_EXHAUSTED | A cell has used all its repair attempts. | Report this to the user. Export the result as partial. |
 | RUNTIME_DISCONNECTED | The kernel or Colab runtime was lost. | Run `resume`. It replays verified cells in a fresh runtime. |
-| AUTH_REQUIRED / WAITING_FOR_AUTH | The backend needs the user to sign in. | The user completes the official sign-in flow. Never collect credentials. |
-| QUOTA_EXHAUSTED | The cloud quota has run out. | Stop using the cloud backend. Offer local execution, with the user's consent. |
+| AUTH_REQUIRED / WAITING_FOR_AUTH | The user is not signed in to Google Colab. | The user runs `labpilot colab-login` in their own terminal, then you run the same command again. Never collect credentials. |
+| BACKEND_UNAVAILABLE | The Colab CLI is missing, or `--backend local` was asked for (tests and the offline demo only). | `labpilot setup --backend colab-cli --install-colab-cli`, then `labpilot colab-login`. |
+| QUOTA_EXHAUSTED | The Colab quota has run out. | Tell the user; run `finish` again later. There is no local fallback. |
 | CONSENT_REQUIRED | Cloud compute or file upload needs the user's permission. | Ask the user, then pass `--allow-cloud` / `--allow-upload`. |
-| MCP_UNAVAILABLE | The colab-mcp tools are not listed in the host agent. | Reconnect or restart the agent per colab-mcp's docs, or use the local backend. |
+| MCP_UNAVAILABLE | The colab-mcp tools are not listed in the host agent. | Reconnect or restart the agent per colab-mcp's docs, or use the default colab-cli backend. |
 | BROWSER_UNAVAILABLE | Chromium for Playwright is missing. | Run `python -m playwright install chromium`. |
 | EVIDENCE_INVALID / EVIDENCE_STALE | A screenshot is blank, a cell has no output, or the code changed after capture. | Fix the cell's output display, then re-execute and capture again. |
 | ANCHOR_AMBIGUOUS | An anchor's text changed or doesn't match. | Re-inspect the document and copy the anchors again. |

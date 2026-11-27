@@ -68,7 +68,7 @@ if (-not (Test-Path $venvPy)) {
 }
 Write-Host "Installing LabPilot and dependencies (this can take a few minutes)..."
 & $venvPy -m pip install --disable-pip-version-check --upgrade pip | Out-Null
-& $venvPy -m pip install --disable-pip-version-check --upgrade "$Repo[lab]"
+& $venvPy -m pip install --disable-pip-version-check --upgrade "$Repo"
 if ($LASTEXITCODE -ne 0) { Write-Host "pip install failed" -ForegroundColor Red; exit 3 }
 
 $bin = Join-Path $InstallRoot "bin"

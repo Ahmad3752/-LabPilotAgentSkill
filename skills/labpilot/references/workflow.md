@@ -1,6 +1,7 @@
 # LabPilot workflow reference
 
-Run files live in `<lab>/.labpilot/runs/<run-id>/`. You write three JSON files, and LabPilot validates each one.
+Run files live in `<lab>/.labpilot/runs/<run-id>/`. You write three JSON files (plan, cells, answers), and LabPilot
+validates each one. Everything between them is one command, `labpilot finish` (below).
 
 ## plan.json
 
@@ -66,28 +67,61 @@ Rules for cell code:
 - Check cells should print readable sentences ("Both runs gave the same totals.") rather than `KEY = value` lines. End a cell with `_ = helper(...)` when the last call returns a status code, so that no stray `Out[ ]: 0` appears in the screenshot.
 - Cells execute in order in one kernel. Every `execute` starts a fresh kernel and replays from the first cell, so do not rely on state from an earlier attempt.
 
+## labpilot finish
+
+After `labpilot plan` has accepted the plan, `finish` runs the remaining mechanical steps in order:
+build-notebook → preflight → execute on Google Colab → capture → answers → export (which runs `evaluate`).
+It skips every step whose output is already current (unchanged code that passed in the current attempt,
+screenshots from the current attempt, answers for the current attempt, a COMPLETED export), and stops at the
+first step that needs you or the user.
+
+```bash
+labpilot finish <id> --cells cells.json --allow-cloud --allow-upload --json   # first call: stops at "answers"
+labpilot finish <id> --answers answers.json --json                            # writes and checks the Word copy
+```
+
+The JSON summary:
+
+```json
+{"ok": true, "run_id": "...", "verdict": "COMPLETED | PARTIAL | NOT_FINISHED",
+ "steps": [{"step": "execute", "status": "done | skipped | failed | waiting", "...": "..."}],
+ "output_dir": "<lab>/output/<name>-<run-id>", "docx": "..._Completed.docx", "failed_checks": {},
+ "runtime_release": null, "next_action": {"actor": "agent | user | none", "action": "...", "detail": "..."}}
+```
+
+Do what `next_action` says, then run `finish` again with whatever you changed (`--cells` or `--answers`).
+Exit code 0 means COMPLETED; 6 means it stopped and `next_action` tells you why.
+
+Keep your context small: read the summary only. Do not print whole notebooks, logs or `status` dumps; when you
+need the outputs, read the text outputs of `notebook/executed.ipynb` (skip embedded images), and send any long
+tool output to a file and read just the part you need.
+
 ## Repair loop
 
-`labpilot execute <id> --json` returns `status` as `OK`, `FAILED_CELLS` or `PARTIAL` (some cells are blocked by missing inputs).
-
-For each item in `failed[]`, read `error_code`, `error_type`, `error_message` and `traceback_tail`, then fix that cell:
+When `finish` stops with `action: "repair"`, the execute step lists `failed[]`. For each item, read `error_code`,
+`error_type`, `error_message` and `traceback_tail`, then fix that cell:
 
 | error_code | What to do |
 |---|---|
 | CODE_SYNTAX / CODE_RUNTIME | Fix the code. |
-| MISSING_PACKAGE | Use a library the profile has, or tell the user. |
+| MISSING_PACKAGE | Add the manual's `!pip install` to the setup cell, or use a library Colab has. |
 | MISSING_DATA | Check the file name. Never fabricate the file. |
-| TIMEOUT | Simplify the code or pass `--timeout`. |
-| RUNTIME_DISCONNECTED | Run `labpilot resume`. |
+| TIMEOUT | Simplify the code or pass `--timeout` to `labpilot execute`. |
+| RUNTIME_DISCONNECTED | Run `finish` again; it reruns transient failures. |
 
-Rebuild with `build-notebook`. Changed cells become `pending`, and every later cell becomes `stale`. Each change to a failed cell uses one repair. When the budget (default 3) runs out, stop and report to the user.
+Run `finish --cells cells.json` again. Changed cells become `pending` and every later cell becomes `stale`; a failed
+cell whose code did not change is not sent to Colab again. Each change to a failed cell uses one repair. When the
+budget (default 3) runs out, stop and report to the user. Every execution starts a fresh Colab runtime and replays
+the cells in order, because later cells need the earlier cells' state.
 
-## colab-mcp (host-mediated)
+## colab-mcp (host-mediated, experimental)
 
-1. `labpilot execute <id> --backend colab-mcp --json` returns `WAITING_FOR_HOST` and writes `host_actions.json`.
-2. Make sure the colab-mcp tools are listed in your session. If they are not, report `MCP_UNAVAILABLE` and offer the local backend.
+1. `labpilot finish <id> --backend colab-mcp --allow-cloud --allow-upload --json` stops with
+   `action: "record-execution"` and writes `host_actions.json`.
+2. Make sure the colab-mcp tools are listed in your session. If they are not, report `MCP_UNAVAILABLE`.
 3. Upload the files and check their sha256. Then run the cells in order and collect each cell's real nbformat outputs.
-4. Write `result.json` (`HostExecutionRecord` in `host_actions.json` `result_schema`) and run `labpilot record-execution <id> --file result.json`.
+4. Write `result.json` (`HostExecutionRecord` in `host_actions.json` `result_schema`), run
+   `labpilot record-execution <id> --file result.json`, then `labpilot finish <id>` again.
 
 ## answers.json
 
@@ -112,6 +146,7 @@ Rebuild with `build-notebook`. Changed cells become `pending`, and every later c
 
 ## Resume and inputs
 
+- `labpilot finish <id> --json` continues from the last consistent checkpoint: it rechecks input hashes, re-stages
+  new or changed datasets, and replays, captures and exports only what is no longer current.
 - `labpilot status <id> --json` shows the state, failures, blockers and `next_action`.
-- `labpilot resume <id>` rechecks input hashes, re-stages new or changed datasets, replays cells, captures and exports. It stops when it needs you (`actor: agent`) or the user.
 - If the manual itself changed, start a new run.

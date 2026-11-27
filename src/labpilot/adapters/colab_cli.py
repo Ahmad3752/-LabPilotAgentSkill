@@ -51,6 +51,7 @@ REMOTE_DIR = "/content"
 AUTH_HINTS = re.compile(r"(authorization code|Enter the authorization|accounts\.google\.com|oauth|invalid_grant|"
                         r"Reauthentication|credentials were not found|DefaultCredentialsError|401)", re.I)
 QUOTA_HINTS = re.compile(r"(quota|resource exhausted|429|usage limit|no backend|not available|compute units)", re.I)
+GONE_HINTS = re.compile(r"(appears to be lost|session .* not found)", re.I)  # nothing left to release
 LOST_HINTS = re.compile(r"(appears to be lost|session .* not found|connection (refused|closed|reset)|websocket)", re.I)
 
 
@@ -263,20 +264,45 @@ class ColabCliBackend:
         return RuntimeHealth(True, marker not in ("", "None"), f"marker={marker}")
 
     def cancel(self, run: Run) -> bool:
-        session = run.manifest.backend_state.get("session")
-        if session and session in run.manifest.backend_state.get("owned_sessions", []):
-            self._colab("stop", "-s", session, timeout=300)
-            return True
-        return False
+        """Stop the current session and retry any release that was not confirmed earlier."""
+        state = run.manifest.backend_state
+        sessions = [*state.get("release_pending", []), state.get("session")]
+        attempted = False
+        for session in dict.fromkeys(s for s in sessions if s):
+            if session in state.get("owned_sessions", []):
+                self._release(run, session)
+                attempted = True
+        return attempted
 
     def stop(self, handle: RuntimeHandle, ctx: RunContext) -> None:
         session = handle.state.get("session", "")
         owned = ctx.run.manifest.backend_state.get("owned_sessions", [])
         if session.startswith(SESSION_PREFIX) and session in owned:  # never stop sessions LabPilot did not create
-            self._colab("stop", "-s", session, timeout=300)
-            owned.remove(session)
-            ctx.run.manifest.backend_state.pop("session", None)
-            ctx.run.save()
+            self._release(ctx.run, session)
+
+    def _release(self, run: Run, session: str) -> bool:
+        """Clear ownership only after `colab stop` succeeded; otherwise keep the session as release-pending."""
+        if not session.startswith(SESSION_PREFIX):
+            return False
+        res = self._colab("stop", "-s", session, timeout=300)
+        state = run.manifest.backend_state
+        pending = state.setdefault("release_pending", [])
+        released = res.ok or bool(GONE_HINTS.search(strip_ansi(res.stdout + res.stderr)))
+        if released:
+            if session in state.get("owned_sessions", []):
+                state["owned_sessions"].remove(session)
+            if session in pending:
+                pending.remove(session)
+            if state.get("session") == session:
+                state.pop("session")
+        else:
+            if session not in pending:
+                pending.append(session)
+            run.event("progress", message=f"release of Colab session {session} attempted, not confirmed")
+        if not pending:
+            state.pop("release_pending")
+        run.save()
+        return released
 
 
 def sha256_bytes(data: bytes) -> str:

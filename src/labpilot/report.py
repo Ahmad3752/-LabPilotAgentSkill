@@ -11,19 +11,21 @@ from typing import Any
 from labpilot import SCHEMA_VERSION, __version__
 from labpilot.documents.validate import render_pages, validate_docx
 from labpilot.documents.write import TaskContent, write_document
-from labpilot.errors import ErrorCode, LabPilotError
+from labpilot.errors import ErrorCode, ExitCode, LabPilotError
 from labpilot.evaluate import evaluate
 from labpilot.evidence.manifest import load_evidence
 from labpilot.evidence.validate import validate_evidence
 from labpilot.models import AnswersFile, ItemStatus, Plan, RunState, utcnow
 from labpilot.orchestration import (
     _source_copy,
+    build,
     capture,
     check_inputs,
     execute,
     load_plan,
     preflight,
     reset_for_changed_inputs,
+    save_answers,
     validate_answers,
 )
 from labpilot.security import redact, redact_obj
@@ -385,9 +387,8 @@ def status(run: Run) -> dict[str, Any]:
     }
 
 
-def resume(run: Run, backend: str | None = None, allow_cloud: bool = False, allow_upload: bool = False,
-           max_steps: int = 8) -> dict[str, Any]:
-    """Advance deterministic steps from the last consistent checkpoint until agent/user input is needed."""
+def _recover(run: Run) -> list[dict[str, Any]]:
+    """Re-validate changed inputs and drop kernel state that an interrupted attempt left behind."""
     steps: list[dict[str, Any]] = []
     m = run.manifest
     if run.path("plan.json").exists():
@@ -395,12 +396,22 @@ def resume(run: Run, backend: str | None = None, allow_cloud: bool = False, allo
         blockers_before = [b.code for b in m.blockers if b.code.startswith("DATASET_")]
         if changes or blockers_before:
             steps.append({"step": "revalidate-inputs", "result": reset_for_changed_inputs(run)})
-    if m.state in (RunState.CANCELLED, RunState.PAUSED, RunState.EXECUTING) and not m.backend_state.get("pending_host_actions"):
+    interrupted = m.state in (RunState.CANCELLED, RunState.PAUSED) or (
+        m.state == RunState.EXECUTING and "executing_attempt" in m.backend_state)  # a completed execute clears it
+    if interrupted and not m.backend_state.get("pending_host_actions"):
         for cid, s in list(m.cell_status.items()):
             if s != ItemStatus.FAILED:
                 m.cell_status[cid] = ItemStatus.STALE if s == ItemStatus.PASSED else s
         run.save()
         steps.append({"step": "invalidate-kernel-state", "result": "fresh kernel: verified cells will be replayed"})
+    return steps
+
+
+def resume(run: Run, backend: str | None = None, allow_cloud: bool = False, allow_upload: bool = False,
+           max_steps: int = 8) -> dict[str, Any]:
+    """Advance deterministic steps from the last consistent checkpoint until agent/user input is needed."""
+    steps = _recover(run)
+    m = run.manifest
     for _ in range(max_steps):
         na = next_action(run)
         if na["actor"] != "labpilot":
@@ -430,3 +441,145 @@ def resume(run: Run, backend: str | None = None, allow_cloud: bool = False, allo
             steps.append({"step": "export", "status": res["status"], "output_dir": res["output_dir"]})
             break
     return {"run_id": run.id, "steps": steps, "state": str(run.manifest.state), "next_action": next_action(run)}
+
+
+# ------------------------------------------------------------------ finish: the mechanical chain in one command
+
+# failures worth simply re-running; any other failed cell needs the agent to change its code first
+TRANSIENT = {str(c) for c in (ErrorCode.RUNTIME_DISCONNECTED, ErrorCode.TIMEOUT, ErrorCode.NETWORK,
+                              ErrorCode.QUOTA_EXHAUSTED, ErrorCode.AUTH_REQUIRED)}
+USER_ERRORS = {ErrorCode.AUTH_REQUIRED, ErrorCode.BACKEND_UNAVAILABLE, ErrorCode.QUOTA_EXHAUSTED,
+               ErrorCode.CONSENT_REQUIRED, ErrorCode.RETRY_BUDGET_EXHAUSTED}
+
+
+def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None = None, backend: str | None = None,
+           allow_cloud: bool = False, allow_upload: bool = False) -> dict[str, Any]:
+    """build-notebook -> preflight/execute -> capture -> answers -> export (runs evaluate); skips current steps.
+
+    Stops at the first step that needs the agent (failed cells, answers) or the user (sign-in, consent).
+    """
+    plan = load_plan(run)
+    m = run.manifest
+    rid = run.id
+    steps: list[dict[str, Any]] = []
+    stop: dict[str, str] | None = None
+    ran = False  # a step changed the run in this call, so later outputs are no longer current
+    step = "build-notebook"
+    try:
+        if cells_file:
+            res = build(run, cells_file)
+            steps.append({"step": step, "status": "done", "changed_cells": res["changed_cells"]})
+            ran = bool(res["changed_cells"])
+        elif run.source_notebook.exists():
+            steps.append({"step": step, "status": "skipped", "reason": "notebook already built"})
+        else:
+            raise LabPilotError(ErrorCode.INVALID_STATE, "No notebook yet.",
+                                next_action=f"labpilot finish {rid} --cells cells.json")
+        step = "revalidate-inputs"
+        recovered = _recover(run)
+        steps += [{**r, "status": "done"} for r in recovered]
+        ran = ran or any(r["result"] for r in recovered)
+
+        step = "execute"
+        rp = run.exec_dir / "current_records.json"
+        transient = {r["cell_id"] for r in (read_json(rp) if rp.exists() else []) if r.get("error_code") in TRANSIENT}
+        failed = [c for c, s in m.cell_status.items() if s == ItemStatus.FAILED]
+        todo = [c for c, s in m.cell_status.items() if s in (ItemStatus.PENDING, ItemStatus.STALE)]
+        if m.backend_state.get("pending_host_actions"):
+            stop = {"actor": "agent", "action": "record-execution",
+                    "detail": f"Run the cells in host_actions.json via colab-mcp, then `labpilot record-execution {rid} "
+                              "--file result.json`, then `labpilot finish` again."}
+        elif [c for c in failed if c not in transient] and not todo:
+            steps.append({"step": step, "status": "failed", "failed_cells": failed})
+            stop = {"actor": "agent", "action": "repair",
+                    "detail": f"Fix the failing cells {failed} (tracebacks: `labpilot status {rid} --json`), then "
+                              f"`labpilot finish {rid} --cells cells.json`."}
+        elif todo or failed:
+            step = "preflight"
+            pf = preflight(run, backend or m.backend or "auto", allow_cloud, allow_upload)
+            bad = [c for c in pf["preflight"]["checks"] if not c["ok"] and c.get("required", True)]
+            steps.append({"step": step, "status": "done" if pf["ok"] else "failed", "backend": pf["backend"],
+                          "failed_checks": [c["name"] for c in bad], "input_changes": pf["input_changes"]})
+            if not pf["ok"]:
+                consent = any(c["name"].startswith("consent") for c in bad)
+                stop = {"actor": "user" if consent else "agent", "action": "consent" if consent else "preflight",
+                        "detail": (f"Ask the user whether LabPilot may run this lab in their Google Colab and upload "
+                                   f"the lab files, then `labpilot finish {rid} --allow-cloud --allow-upload`."
+                                   if consent else
+                                   "; ".join([c["fix"] for c in bad if c.get("fix")] + pf["input_changes"]))}
+            else:
+                step = "execute"
+                ex = execute(run)
+                ran = True
+                steps.append({"step": step, "status": "failed" if ex["status"] == "FAILED_CELLS" else "done",
+                              "result": ex["status"], "attempt_id": ex.get("attempt_id"),
+                              "passed": len(ex.get("passed", [])), "failed": ex.get("failed", []),
+                              "blocked": ex.get("blocked", []), "runtime_release": ex.get("runtime_release")})
+                if ex["status"] == "WAITING_FOR_HOST":
+                    stop = {"actor": "agent", "action": "record-execution", "detail": ex["next_action"]}
+                elif ex["status"] == "FAILED_CELLS":
+                    stop = {"actor": "agent", "action": "repair",
+                            "detail": "Fix the failing cells using `failed[].traceback_tail`, then "
+                                      f"`labpilot finish {rid} --cells cells.json`."}
+        else:
+            steps.append({"step": step, "status": "skipped", "reason": "every runnable cell passed with the current code"})
+
+        step = "capture"
+        if stop is None:
+            ev = load_evidence(run.dir)
+            em = run.dir / "evidence" / "evidence_manifest.json"
+            if ev and not ran and all(e.attempt_id == m.current_attempt for e in ev):
+                problems = read_json(em).get("capture_problems", []) if em.exists() else []
+                steps.append({"step": step, "status": "skipped", "reason": "screenshots match the current attempt"})
+            else:
+                cap = capture(run)
+                ran = True
+                problems = cap["problems"]
+                steps.append({"step": step, "status": "failed" if problems else "done", "images": cap["images"],
+                              "problems": problems})
+            if problems:
+                stop = {"actor": "agent", "action": "repair-output",
+                        "detail": f"Some cells show no output; add print/display, then `labpilot finish {rid} "
+                                  "--cells cells.json`."}
+
+        step = "answers"
+        if stop is None:
+            if answers_file:
+                res = save_answers(run, answers_file)
+                ran = True
+                steps.append({"step": step, "status": "done", "answers": res["answers"],
+                              "not_verified": res["not_verified"]})
+            elif run.path("answers.json").exists() and m.backend_state.get("answers_attempt") == m.current_attempt:
+                steps.append({"step": step, "status": "skipped", "reason": "answers match the current attempt"})
+            elif any(t.observation_questions for t in plan.tasks) or run.path("answers.json").exists():
+                steps.append({"step": step, "status": "waiting"})
+                stop = {"actor": "agent", "action": "answers",
+                        "detail": f"Read the outputs in {run.executed_notebook}, write answers.json from them, then "
+                                  f"`labpilot finish {rid} --answers answers.json`."}
+            else:
+                steps.append({"step": step, "status": "skipped", "reason": "the plan has no questions"})
+
+        step = "export"
+        if stop is None:
+            out = m.outputs
+            if not ran and m.state == RunState.COMPLETED and out.get("docx") and Path(out["dir"], out["docx"]).exists():
+                steps.append({"step": step, "status": "skipped", "reason": "already exported as COMPLETED"})
+            else:
+                exp = export(run)
+                steps.append({"step": step, "status": "done", "result": exp["status"],
+                              "failed_checks": exp["failed_checks"]})
+    except LabPilotError as exc:
+        if exc.exit_code == ExitCode.CANCELLED:
+            raise
+        steps.append({"step": step, "status": "failed", "error": exc.to_dict()})
+        stop = {"actor": "user" if exc.code in USER_ERRORS else "agent", "action": str(exc.code),
+                "detail": exc.next_action.replace("<run-id>", rid)}
+
+    finished = stop is None and m.state in (RunState.COMPLETED, RunState.PARTIAL)
+    exported = next((s for s in steps if s["step"] == "export" and s["status"] == "done"), None)
+    return {"run_id": rid, "verdict": str(m.state) if finished else "NOT_FINISHED", "steps": steps,
+            "output_dir": m.outputs.get("dir") if finished else None,
+            "docx": m.outputs.get("docx") if finished else None,
+            "failed_checks": exported["failed_checks"] if exported else {},
+            "runtime_release": m.backend_state.get("release_pending") or None,
+            "next_action": stop or next_action(run)}

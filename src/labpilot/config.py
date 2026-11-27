@@ -34,7 +34,7 @@ def config_path() -> Path:
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "backend": "auto",  # auto | local | colab-cli | colab-mcp
+    "backend": "colab-cli",  # colab-cli | colab-mcp; lab code runs on Google Colab only
     "agents": [],
     "colab_cli": {"command": None},
     "aliases": {},  # expected dataset name -> actual file name
