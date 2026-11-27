@@ -43,6 +43,8 @@ Last updated: 2026-11-27.
 
 ## Session log (newest first; keep the last five)
 
+- **2026-11-27:** First full clean run of `install.ps1`, which works. Rewrote the README quick start so a friend can follow it from a terminal: `-ExecutionPolicy Bypass`, a new terminal after the PATH change, starting the agent in `C:\Labs`, both Codex and Claude, and a note that ChatGPT cannot run it.
+
 - **2026-11-27:** Added the Colab check (`colab_fit` in `init`/`inspect`, plus `labpilot colab-check`), calibrated on the real CS-412 Labs 1–11, which all came out correct. The skill now checks Colab first and asks "should I do it?". Fixed the LMS download instruction: `dest` must be a file path.
 
 - **2026-11-27 (after restart):** The `moodle` MCP works with the TLS workaround. Ran the first real read-only `lms check`: 19 assignments, 1 new lab (Lab 11), all classified correctly. Nothing downloaded or submitted.

@@ -36,22 +36,40 @@ output/<lab-name>-<run-id>/
 
 ## Quick start (Windows 11)
 
-Requires Python 3.11+. To use Google Colab you need a **signed** Python 3.12+ (python.org or Microsoft Store), because Windows Smart App Control blocks unsigned builds.
+You need:
+- **Python 3.12+ from python.org** (tick "Add python.exe to PATH"). It must be a signed build, because Windows Smart App Control blocks unsigned ones.
+- **Git**, and **Codex** or **Claude Code** signed in. The ChatGPT website cannot run LabPilot, because it cannot run programs on your computer.
+- A Google account for Colab.
+
+**1. Install** (PowerShell, about 5 minutes). `-ExecutionPolicy Bypass` lets this one script run without changing your settings:
 
 ```powershell
 git clone https://github.com/Ahmad3752/-LabPilotAgentSkill.git
 cd -LabPilotAgentSkill
-.\scripts\install.ps1 -Agent claude -ProjectDir C:\Labs -InstallBrowser -AddToPath
-labpilot setup --agent claude --backend colab-cli --install-colab-cli --project-dir C:\Labs
-labpilot colab-login        # one-time Google sign-in, in the official Colab CLI
-labpilot doctor             # check everything is ready
+mkdir C:\Labs
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Agent both -ProjectDir C:\Labs -InstallBrowser -AddToPath -Yes
 ```
 
-Then put the manual and its datasets in a folder under `C:\Labs`, open that folder in Claude Code and ask:
+**2. Close PowerShell and open a new one** (so `labpilot` is on PATH), then set up Google Colab once:
 
-> Use LabPilot to work through the lab in this folder, run the code in Colab, collect screenshots, and prepare the Word document for my review.
+```powershell
+labpilot setup --agent both --backend colab-cli --install-colab-cli --project-dir C:\Labs
+labpilot colab-login        # opens Google sign-in; paste the code it gives you back into the terminal
+labpilot doctor             # the last line should say: ready: colab=True
+```
 
-The agent asks before using Colab compute or uploading your files.
+**3. Do a lab.** Put the manual (`.docx`) and its data files in their own folder, for example `C:\Labs\Lab 1\`. Then start your agent **from `C:\Labs`**, where the skill is installed:
+
+```powershell
+cd C:\Labs
+codex          # or: claude
+```
+
+and ask:
+
+> Use LabPilot to do the lab in the "Lab 1" folder on Google Colab.
+
+The agent first checks whether the lab can be done in Colab (it stops and says why if not, e.g. an AWS or Docker lab), then asks before using Colab and uploading your files. In Codex, approve its requests to run commands with network access: Colab needs the internet.
 
 ### Try it without an agent
 
@@ -73,7 +91,8 @@ This runs a synthetic sample lab through the real CLI with known agent files.
 | Crash, cancel and missing-data recovery (`resume`) | Verified |
 | Screenshots (headless Chromium renderings of the executed notebook) | Verified |
 | Filling a copy of the Word manual, plus quality review (`evaluate`) | Verified |
-| Checking the university LMS for new labs (Nuts LMS MCP, read-only) | Implemented, not yet verified with a real account |
+| Checking the university LMS for new labs (Nuts LMS MCP, read-only) | Verified with a real account (finding labs); downloads not yet verified |
+| Windows installer (`scripts/install.ps1`) | Verified with a clean install |
 | Google Colab through the browser (`colab-mcp`) | Experimental, not yet verified |
 | Codex, macOS, Linux | Implemented, not yet verified |
 
