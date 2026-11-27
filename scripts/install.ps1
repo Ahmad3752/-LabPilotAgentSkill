@@ -99,6 +99,12 @@ New-Item -ItemType Directory -Force $ProjectDir | Out-Null
 if ($Agent -ne "none") {
   & $shim setup --agent $Agent --scope $Scope --project-dir $ProjectDir --backend colab-cli --install-colab-cli
 }
+if ($Agent -eq "codex" -or $Agent -eq "both") {
+  # setup wrote ~\.codex\rules\labpilot.rules (runs labpilot outside Codex's sandbox, no prompt) and
+  # $ProjectDir\.codex\config.toml (approval mode "on-request" + "auto_review"), which Codex reads once the folder is trusted
+  Write-Host "`nCodex: when Codex asks whether to trust $ProjectDir, answer yes. That turns on the 'Approve for me' mode LabPilot set." -ForegroundColor Cyan
+  Write-Host "If Codex still refuses labpilot commands, type /permissions in Codex and pick 'Approve for me'." -ForegroundColor Cyan
+}
 $state = (& $shim doctor --json --project-dir $ProjectDir) -join "`n" | ConvertFrom-Json
 if (-not $state.colab_cli.authenticated) {
   Write-Host "`nSign in to Google Colab (once):" -ForegroundColor Cyan

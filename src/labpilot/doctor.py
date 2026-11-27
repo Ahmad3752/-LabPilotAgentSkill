@@ -13,7 +13,7 @@ from typing import Any
 
 from labpilot import __version__
 from labpilot.adapters.colab_cli import AUTH_HINTS, ColabCliBackend
-from labpilot.agents import skill_status, skill_targets
+from labpilot.agents import agent_access_status, skill_status, skill_targets
 from labpilot.config import load_config
 from labpilot.documents.validate import find_renderer, find_word
 from labpilot.errors import ErrorCode, ExitCode, LabPilotError, strip_ansi
@@ -228,6 +228,7 @@ def doctor(project_dir: Path | None = None) -> dict[str, Any]:
         "python": {"version": platform.python_version(), "ok": sys.version_info >= (3, 11)},
         "agents": {"codex": _agent("codex"), "claude": _agent("claude")},
         "skills": skills,
+        "agent_access": agent_access_status(project_dir),
         "browser": _browser(),
         "local_kernel": _kernel(),
         "colab_cli": _colab_cli(),
@@ -249,6 +250,10 @@ def doctor(project_dir: Path | None = None) -> dict[str, Any]:
         problems.append("No supported coding agent found (Codex or Claude Code)")
     if not any(s.get("installed") for s in skills.values()):
         problems.append("LabPilot skill not installed: labpilot setup --agent codex (or claude)")
+    for a in ("codex", "claude"):
+        acc = report["agent_access"][a]
+        if report["agents"][a]["available"] and any(s.get("installed") for k, s in skills.items() if k.startswith(a))                 and not acc["ok"]:
+            problems.append(f"{a} cannot run labpilot yet: {acc['fix']}")
     report["ready_for_local_fallback"] = report["browser"]["available"] and report["local_kernel"]["available"]
     report["ready_for_colab"] = bool(report["colab_cli"].get("authenticated")) or report["colab_mcp"]["registered"]
     if not report["ready_for_colab"]:

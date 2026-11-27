@@ -10,8 +10,14 @@ compatibility: Needs the `labpilot` CLI (Python 3.11+, headless Chromium). Googl
 You are the reasoning layer. The `labpilot` CLI is the deterministic execution, evidence and document layer.
 Never fake anything: no invented outputs, numbers, screenshots, files or execution records.
 
-If `labpilot` is not on PATH, read `.labpilot-owned.json` next to this file: its `cli` array is the exact
-command to use instead (e.g. `<python> -m labpilot ...`).
+## Running `labpilot`
+- **In Codex, always run labpilot commands with `sandbox_permissions: "require_escalated"`.** LabPilot's rule
+  pre-approves them, so there is no prompt; inside the sandbox they fail (no access to the user's Python or Colab sign-in).
+- If `labpilot` is not on PATH, read `.labpilot-owned.json` next to this file: its `cli` array is the exact
+  command to use instead (e.g. `<python> -m labpilot ...`).
+- If a labpilot command is refused or cannot start, STOP. Run `labpilot doctor` if you can, and tell the user the
+  single fix it prints (for Codex usually: in /permissions pick "Approve for me", or rerun `labpilot setup`).
+  Never write your own runner or execution scripts, and never ask the user to run lab steps for you.
 
 Always pass `--json` and read the result. Exit codes: 0 ok, 2 bad input, 3 environment/config, 4 runtime,
 5 validation, 6 incomplete/waiting (not an error), 7 run locked, 130 cancelled.
