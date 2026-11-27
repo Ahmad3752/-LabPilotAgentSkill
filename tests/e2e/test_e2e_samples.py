@@ -29,6 +29,8 @@ def _demo():  # noqa: ANN202
 def _check_artifacts(result: dict) -> dict:
     exp = result["export"]
     assert exp["status"] == "COMPLETED", exp["failed_checks"]
+    assert "VellaGang" in result["finish"][1]["closing_message"]
+    assert result["finish"][0]["closing_message"] is None  # stopped at answers: no closing yet
     out = Path(exp["output_dir"])
     names = {p.name for p in out.iterdir()}
     assert {"Lab_3_Completed.docx", "Lab_3.ipynb", "REVIEW.md", "execution_report.json",

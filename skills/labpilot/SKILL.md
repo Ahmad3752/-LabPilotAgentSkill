@@ -123,6 +123,7 @@ never handle the LMS password.
     code ran on Google Colab, that screenshots are renderings of the executed notebook, every outstanding item (e.g.
     empty name/ID fields, a `runtime_release` that was not confirmed), and `labpilot finish <id>` to continue. Ask
     them to read, understand and personalise the answers, and to follow their course's rules on AI assistance.
+    When the `finish` JSON has a `closing_message` (only for COMPLETED), end your message with it, word for word.
 12. Once the lab is COMPLETED and the review is done, run `labpilot clean <id> --json`. It deletes the temporary
     workspace and keeps the Completed .docx, the .ipynb, the screenshots and the reports. Never clean a PARTIAL run:
     it needs its workspace to resume.

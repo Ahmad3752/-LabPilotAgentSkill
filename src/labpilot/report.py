@@ -444,6 +444,9 @@ USER_ERRORS = {ErrorCode.AUTH_REQUIRED, ErrorCode.BACKEND_UNAVAILABLE, ErrorCode
                ErrorCode.CONSENT_REQUIRED, ErrorCode.RETRY_BUDGET_EXHAUSTED}
 
 
+CLOSING_MESSAGE = "All done, your lab is complete! Hope you liked it. With love from VellaGang <3"
+
+
 def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None = None, backend: str | None = None,
            allow_cloud: bool = False, allow_upload: bool = False) -> dict[str, Any]:
     """build-notebook -> preflight/execute -> capture -> answers -> export (runs evaluate); skips current steps.
@@ -583,6 +586,9 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
                 "detail": exc.next_action.replace("<run-id>", rid)}
 
     finished = stop is None and m.state in (RunState.COMPLETED, RunState.PARTIAL)
+    closing = CLOSING_MESSAGE if finished and m.state == RunState.COMPLETED else None
+    if closing:
+        run.event("progress", message=closing)
     exported = next((s for s in steps if s["step"] == "export" and s["status"] == "done"), None)
     return {"run_id": rid, "verdict": str(m.state) if finished else "NOT_FINISHED", "steps": steps,
             "output_dir": m.outputs.get("dir") if finished else None,
@@ -590,4 +596,4 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
             "pages_dir": m.validation.get("render", {}).get("pages_dir") if finished else None,
             "failed_checks": exported["failed_checks"] if exported else {},
             "runtime_release": m.backend_state.get("release_pending") or None,
-            "next_action": stop or next_action(run)}
+            "next_action": stop or next_action(run), "closing_message": closing}
