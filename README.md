@@ -44,8 +44,8 @@ You need:
 **Install and start** (PowerShell, about 10 minutes, once). `-ExecutionPolicy Bypass` lets this one script run without changing your settings:
 
 ```powershell
-git clone https://github.com/Ahmad3752/-LabPilotAgentSkill.git
-cd -LabPilotAgentSkill
+git clone https://github.com/Ahmad3752/-LabPilotAgentSkill.git LabPilot
+cd LabPilot
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Agent both -ProjectDir C:\Labs -InstallBrowser -AddToPath -Yes
 ```
 
