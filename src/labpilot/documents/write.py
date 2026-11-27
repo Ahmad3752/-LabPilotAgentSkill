@@ -185,17 +185,27 @@ def _picture(sink: _Sink, path: Path, rec: EvidenceRecord, avail_in: float, keep
 
 
 def display_heading(t: Task) -> str:
-    """Heading in the manual's own terms: 'Question 3.2: Add a combiner', 'Part A: ...', or the plain title."""
-    m = re.fullmatch(r"T(\d+)\.(\d+)", t.id)
-    if m:
-        return f"Question {m.group(1)}.{m.group(2)}: {t.title}"
-    m = re.fullmatch(r"T(\d+)\.([A-Z])", t.id)
-    if m:
-        return f"Task {m.group(1)}, Part {m.group(2)}: {t.title}"
-    m = re.fullmatch(r"T(\d+)", t.id)
-    if m:
-        return f"Task {m.group(1)}: {t.title}"
-    return t.title
+    """Heading in the manual's own terms: 'Question 3.2: Add a combiner', 'Part A: ...', or the plain title.
+
+    A title that already starts with its own label ('Task 2 – Scalability') is not prefixed twice.
+    """
+    if m := re.fullmatch(r"T(\d+)\.(\d+)", t.id):
+        labels = [f"Question {m.group(1)}.{m.group(2)}"]
+    elif m := re.fullmatch(r"T(\d+)\.([A-Z])", t.id):
+        labels = [f"Task {m.group(1)}, Part {m.group(2)}", f"Part {m.group(2)}"]
+    elif m := re.fullmatch(r"T(\d+)-([ATEP])(\d+)", t.id):  # "Activity 1.2" units from inspect
+        word = {"A": "Activity", "T": "Task", "E": "Exercise", "P": "Problem"}[m.group(2)]
+        labels = [f"Task {m.group(1)}, {word} {m.group(1)}.{m.group(3)}", f"{word} {m.group(1)}.{m.group(3)}"]
+    elif m := re.fullmatch(r"T(\d+)", t.id):
+        labels = [f"Task {m.group(1)}"]
+    else:
+        return t.title
+    for label in labels:
+        own = re.match(re.escape(label).replace(r"\ ", r"\s*") + r"(?![\w.])\s*[:.,\-–—]?\s*", t.title, re.I)
+        if own:
+            rest = t.title[own.end():]
+            return f"{labels[0]}: {rest}" if rest else labels[0]
+    return f"{labels[0]}: {t.title}"
 
 
 def _write_task(sink: _Sink, run_dir: Path, content: TaskContent, avail: float, run_label: str, report: WriteReport) -> None:
