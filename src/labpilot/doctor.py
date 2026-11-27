@@ -57,6 +57,7 @@ def nuts_lms() -> dict[str, Any]:
     cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "moodle-mcp"
     signed_in = any(cache.glob("*.token.json")) if cache.is_dir() else False
     where = []
+    tls_workaround = False
     for path in (Path.home() / ".claude.json", Path.cwd() / ".mcp.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -66,9 +67,11 @@ def nuts_lms() -> dict[str, Any]:
         for proj in (data.get("projects") or {}).values():
             servers.update(proj.get("mcpServers", {}) or {})
         # `moodle-mcp serve`, or `<python> -m moodle_mcp serve` where Smart App Control blocks the uv .exe launcher
-        if any(re.search(r"moodle[-_]mcp", f"{s.get('command', '')} {' '.join(map(str, s.get('args') or []))}")
-               for s in servers.values() if isinstance(s, dict)):
+        entries = [s for s in servers.values() if isinstance(s, dict) and re.search(
+            r"moodle[-_]mcp", f"{s.get('command', '')} {' '.join(map(str, s.get('args') or []))}")]
+        if entries:
             where.append(f"claude:{path.name}")
+            tls_workaround = tls_workaround or any("OPENSSL_CONF" in (s.get("env") or {}) for s in entries)
     codex_cfg = Path.home() / ".codex" / "config.toml"
     if codex_cfg.exists() and re.search(r"moodle[-_]mcp", codex_cfg.read_text(encoding="utf-8", errors="ignore")):
         where.append("codex:config.toml")
@@ -78,15 +81,21 @@ def nuts_lms() -> dict[str, Any]:
     tool_py = Path(os.environ.get("APPDATA", "")) / "uv" / "tools" / "nutslms-mcp" / "Scripts" / "python.exe"
     if exe and sys.platform == "win32" and tool_py.exists():
         run = f'"{tool_py}" -m moodle_mcp'
+    # lms.nust.edu.pk needs legacy TLS renegotiation, which moodle-mcp does not enable yet (see lms_openssl.cnf)
+    cnf = Path(__file__).with_name("lms_openssl.cnf")
+    login = f'$env:OPENSSL_CONF="{cnf}"; {run} login' if sys.platform == "win32" else f'OPENSSL_CONF="{cnf}" {run} login'
+    add = f'claude mcp add moodle -e OPENSSL_CONF="{cnf}" -- {run} serve   (then restart the agent)'
     fix = None
     if not exe:
         fix = "uv tool install git+https://github.com/deeznust42/nutslms-mcp"
     elif not signed_in:
-        fix = f"Run `{run} login` in your own terminal (LabPilot never asks for your LMS password)."
+        fix = f"Run `{login}` in your own terminal (LabPilot never asks for your LMS password)."
     elif not where:
-        fix = f"claude mcp add moodle -- {run} serve   (then restart the agent)"
+        fix = add
+    elif any(w.startswith("claude:") for w in where) and not tls_workaround:
+        fix = "claude mcp remove moodle, then " + add
     return {"installed": bool(exe), "signed_in": signed_in, "registered": bool(where), "where": where,
-            "ready": bool(exe and signed_in and where), "fix": fix}
+            "tls_workaround": tls_workaround, "ready": bool(exe and signed_in and where), "fix": fix}
 
 
 def _browser() -> dict[str, Any]:

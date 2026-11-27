@@ -1,0 +1,13 @@
+# OpenSSL config for the moodle-mcp server process only (set via OPENSSL_CONF in its MCP registration).
+# lms.nust.edu.pk needs legacy renegotiation; OpenSSL 3 refuses it by default. Certificates are still verified.
+# shortcut: workaround until moodle-mcp sets the option itself (PR to deeznust42/nutslms-mcp); delete then.
+openssl_conf = openssl_init
+
+[openssl_init]
+ssl_conf = ssl_sect
+
+[ssl_sect]
+system_default = system_default_sect
+
+[system_default_sect]
+Options = UnsafeLegacyRenegotiation

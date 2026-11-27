@@ -19,8 +19,11 @@ talks only to their LMS. Its tools appear to you as `mcp__moodle__<tool>` (serve
 2. Sign in (the user, in their own terminal): `moodle-mcp login`.
    On Windows, Smart App Control may block `moodle-mcp.exe`. Use the tool's own Python instead:
    `"%APPDATA%\uv\tools\nutslms-mcp\Scripts\python.exe" -m moodle_mcp login`.
-3. Register: `claude mcp add moodle -- moodle-mcp serve` (same Python form on Windows:
-   `claude mcp add moodle -- "<that python.exe>" -m moodle_mcp serve`). Restart the agent afterwards.
+3. Register: `claude mcp add moodle -e OPENSSL_CONF="<labpilot>/lms_openssl.cnf" -- moodle-mcp serve` (same Python
+   form on Windows: `... -- "<that python.exe>" -m moodle_mcp serve`). Restart the agent afterwards.
+   `labpilot doctor` prints the exact command with the real paths. `OPENSSL_CONF` is needed because the NUST LMS
+   server requires legacy TLS renegotiation; without it every call fails with `UNSAFE_LEGACY_RENEGOTIATION_DISABLED`.
+   The login in step 2 needs the same variable (doctor prints that command too).
 
 ## Protocol
 Save every tool result **exactly as returned** (it is JSON text) into `.labpilot/lms/` in the working

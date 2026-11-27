@@ -185,6 +185,12 @@ def test_doctor_nuts_lms(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert re.search(r"moodle[-_]mcp login", doctor.nuts_lms()["fix"])  # `-m moodle_mcp` form on Windows
     (tmp_path / "cache" / "moodle-mcp").mkdir(parents=True)
     (tmp_path / "cache" / "moodle-mcp" / "lms.x.edu.token.json").write_text("{}")
-    assert "claude mcp add" in doctor.nuts_lms()["fix"]
+    fix = doctor.nuts_lms()["fix"]
+    assert "claude mcp add" in fix and "OPENSSL_CONF" in fix
     (home / ".claude.json").write_text(json.dumps({"mcpServers": {"moodle": {"command": "moodle-mcp", "args": ["serve"]}}}))
-    assert doctor.nuts_lms()["ready"] is True
+    r = doctor.nuts_lms()
+    assert r["ready"] is True and r["tls_workaround"] is False and r["fix"].startswith("claude mcp remove moodle")
+    (home / ".claude.json").write_text(json.dumps({"mcpServers": {"moodle": {
+        "command": "moodle-mcp", "args": ["serve"], "env": {"OPENSSL_CONF": "x.cnf"}}}}))
+    r = doctor.nuts_lms()
+    assert r["tls_workaround"] is True and r["fix"] is None
