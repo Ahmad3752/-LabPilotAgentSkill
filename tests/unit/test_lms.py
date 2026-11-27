@@ -181,24 +181,66 @@ def test_doctor_nuts_lms(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))  # no uv tool install here
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(doctor.shutil, "which", lambda name: None)
-    assert doctor.nuts_lms()["fix"].startswith("uv tool install")
+    assert "uv tool install" in doctor.nuts_lms()["fix"]
     monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/bin/{name}")  # moodle-mcp, claude and codex
     assert re.search(r"moodle[-_]mcp login", doctor.nuts_lms()["fix"])
     (tmp_path / "cache" / "moodle-mcp").mkdir(parents=True)
     (tmp_path / "cache" / "moodle-mcp" / "lms.x.edu.token.json").write_text("{}")
     fix = doctor.nuts_lms()["fix"]
-    assert "claude mcp add moodle -e OPENSSL_CONF" in fix and "codex mcp add moodle --env OPENSSL_CONF" in fix
+    assert "claude mcp add -s user moodle -e \"OPENSSL_CONF=" in fix and "codex mcp add moodle --env \"OPENSSL_CONF=" in fix
     (home / ".claude.json").write_text(json.dumps({"mcpServers": {"moodle": {"command": "moodle-mcp", "args": ["serve"]}}}))
     r = doctor.nuts_lms()
-    assert r["ready"] is True and r["tls_workaround"] is False and r["fix"].startswith("claude mcp remove moodle;")
+    assert r["ready"] is True and r["tls_workaround"] is False and "(or: claude mcp remove moodle -s user; claude mcp add" in r["fix"]
     (home / ".claude.json").write_text(json.dumps({"mcpServers": {"moodle": {
         "command": "moodle-mcp", "args": ["serve"], "env": {"OPENSSL_CONF": "x.cnf"}}}}))
     r = doctor.nuts_lms()
-    assert r["tls_workaround"] is True and r["fix"].startswith("codex mcp add moodle")  # Codex still missing
+    assert r["tls_workaround"] is True and "(or: codex mcp add moodle" in r["fix"]  # Codex still missing
     (home / ".codex").mkdir()
     (home / ".codex" / "config.toml").write_text(
         '[mcp_servers.moodle]\ncommand = "moodle-mcp"\nargs = ["serve"]\nenv = { OPENSSL_CONF = "x.cnf" }\n')
     assert doctor.nuts_lms()["fix"] is None
+
+
+def test_lms_connect_runs_only_missing_steps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """FAKE subprocess layer: records the commands instead of installing, signing in or registering."""
+    from labpilot import doctor
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(doctor.Path, "home", classmethod(lambda cls: home))
+    cache = tmp_path / "cache" / "moodle-mcp"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(doctor.sys, "platform", "linux")
+    monkeypatch.setattr(doctor.sys.stdin, "isatty", lambda: True)
+    installed: set[str] = set()
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/bin/{name}" if name in installed | {"uv", "codex"} else None)
+    calls: list[list[str]] = []
+
+    def fake(argv: list[str], **kw: object) -> int:
+        calls.append(list(argv))
+        if "tool" in argv:
+            installed.add("moodle-mcp")
+        if argv[-1] == "login":
+            cache.mkdir(parents=True)
+            (cache / "lms.x.edu.token.json").write_text("{}")
+        if argv[1:3] == ["mcp", "add"]:
+            (home / ".codex").mkdir()
+            (home / ".codex" / "config.toml").write_text(
+                '[mcp_servers.moodle]\ncommand = "moodle-mcp"\nenv = { OPENSSL_CONF = "x" }\n')
+        return 0
+
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", fake)
+    monkeypatch.setattr(subprocess, "call", fake)
+    r = doctor.connect_lms()
+    assert r["ready"] is True and r["fix"] is None
+    assert [c[1:3] for c in calls] == [["tool", "install"], ["login"], ["mcp", "add"]]
+    assert calls[2][-3:] == ["--", "moodle-mcp", "serve"] and calls[2][4:6] == ["--env", calls[2][5]] and calls[2][5].startswith("OPENSSL_CONF=")
+    calls.clear()
+    assert doctor.connect_lms()["ready"] is True and calls == []  # rerun: nothing left to do
 
 
 def test_windows_login_command_is_valid_powershell(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

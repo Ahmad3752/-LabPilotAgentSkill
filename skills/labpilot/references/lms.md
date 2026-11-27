@@ -14,7 +14,10 @@ talks only to their LMS. Its tools appear to you as `mcp__moodle__<tool>` (serve
 - Ask the user before downloading a lab, and only download the labs they choose.
 
 ## Setup (once)
-`labpilot doctor --json` → `nuts_lms`. If `ready` is false, show the user its `fix`:
+`labpilot doctor --json` → `nuts_lms`. If `ready` is false, or `fix` is set for the agent you are running in,
+ask the user to run `labpilot lms connect` **in their own terminal** (it installs, signs in through moodle-mcp's own
+password prompt and registers the server with Codex and Claude Code), then restart you. Do not run it yourself: the
+sign-in needs their keyboard. What it does, step by step (doctor's `fix` also prints these commands):
 1. Install: `uv tool install git+https://github.com/deeznust42/nutslms-mcp`
 2. Sign in (the user, in their own terminal): `moodle-mcp login`.
    On Windows, Smart App Control may block `moodle-mcp.exe`. Use the tool's own Python instead:

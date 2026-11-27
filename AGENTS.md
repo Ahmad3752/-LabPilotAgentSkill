@@ -38,4 +38,4 @@ python examples/run_demo.py <empty-dir> --backend colab-cli   # real Google Cola
 - Subprocesses use argument lists only, never shell strings.
 - Never collect credentials. Only stop or clean up resources that LabPilot owns.
 - Do not commit private lab manuals, datasets, `.labpilot/` or `output/`.
-- LMS: only read-only new-lab discovery through the Nuts LMS MCP (`moodle-mcp`), host-mediated: the agent calls the MCP tools and passes their JSON to `labpilot lms` (`lms.py`). LabPilot never logs in to the LMS, never handles LMS credentials and never submits. WhatsApp and other messaging are out of scope.
+- LMS: only read-only new-lab discovery through the Nuts LMS MCP (`moodle-mcp`), host-mediated: the agent calls the MCP tools and passes their JSON to `labpilot lms` (`lms.py`). LabPilot never logs in to the LMS itself, never reads or stores LMS credentials and never submits. `labpilot lms connect` may only launch moodle-mcp's own login prompt in the user's terminal, uncaptured. WhatsApp and other messaging are out of scope.

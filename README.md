@@ -41,44 +41,31 @@ You need:
 - **Git**, and **Codex** or **Claude Code** signed in. The ChatGPT website cannot run LabPilot, because it cannot run programs on your computer.
 - A Google account for Colab.
 
-**1. Install** (PowerShell, about 5 minutes). `-ExecutionPolicy Bypass` lets this one script run without changing your settings:
+**Install and start** (PowerShell, about 10 minutes, once). `-ExecutionPolicy Bypass` lets this one script run without changing your settings:
 
 ```powershell
 git clone https://github.com/Ahmad3752/-LabPilotAgentSkill.git
 cd -LabPilotAgentSkill
-mkdir C:\Labs
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Agent both -ProjectDir C:\Labs -InstallBrowser -AddToPath -Yes
 ```
 
-**2. Close PowerShell and open a new one** (so `labpilot` is on PATH), then set up Google Colab once:
+The script does everything in order and stops only where you have to type something yourself:
 
-```powershell
-labpilot setup --agent both --backend colab-cli --install-colab-cli --project-dir C:\Labs
-labpilot colab-login        # opens Google sign-in; paste the code it gives you back into the terminal
-labpilot doctor             # the last line should say: ready: colab=True
-```
+1. Installs LabPilot, the screenshot browser, the Google Colab CLI and the skill for Codex and Claude Code.
+2. **Google sign-in:** it opens a link. Approve it and paste the code back into the terminal.
+3. **NUST LMS sign-in:** it installs the [Nuts LMS MCP](https://github.com/deeznust42/nutslms-mcp) and asks for your LMS username and password. That prompt belongs to the LMS tool: LabPilot never sees or stores your password. It then connects the LMS to Codex and Claude Code.
+4. It opens Codex in `C:\Labs` already asking: *"Use LabPilot: are there any new labs on the LMS?"*
 
-**3. Connect the NUST LMS once** (optional, so the agent can find and download labs itself). This uses the [Nuts LMS MCP](https://github.com/deeznust42/nutslms-mcp); you sign in in your own terminal, and LabPilot never sees your password:
+The agent lists your labs and says which ones can be done in Google Colab. Answer with the one you want, for example "do Lab 1" (older labs work too). It asks before it downloads the lab, asks before it uses Colab, and then solves it. Rerunning the script skips whatever is already done. Add `-NoLms` if you are not at NUST.
 
-```powershell
-python -m pip install uv
-uv tool install git+https://github.com/deeznust42/nutslms-mcp
-labpilot doctor     # the "Nuts LMS MCP" line prints the next command: first the login, then the
-                    # registration for Codex and/or Claude. Run it, run doctor again, repeat until it says ready.
-```
-
-**4. Do a lab.** Start your agent **from `C:\Labs`**, where the skill is installed:
+**Next time**, open a new PowerShell and run:
 
 ```powershell
 cd C:\Labs
 codex          # or: claude
 ```
 
-With the LMS connected, ask:
-
-> Use LabPilot: are there any new labs on the LMS?
-
-The agent lists your open labs and says which ones can be done in Google Colab. Answer with the one you want, for example "do Lab 1" (older labs work too). It downloads it, asks before using Colab and uploading the files, and solves it.
+`labpilot doctor` checks the setup at any time and prints the next command for anything missing.
 
 Without the LMS, put the manual (`.docx`) and its data files in a folder such as `C:\Labs\Lab 1\` and ask:
 
@@ -107,7 +94,7 @@ This runs a synthetic sample lab through the real CLI with known agent files.
 | Screenshots (headless Chromium renderings of the executed notebook) | Verified |
 | Filling a copy of the Word manual, plus quality review (`evaluate`) | Verified |
 | Checking the university LMS for new labs (Nuts LMS MCP, read-only) | Verified with a real account (finding labs); downloads not yet verified |
-| Windows installer (`scripts/install.ps1`) | Verified with a clean install |
+| One-command Windows installer (`scripts/install.ps1`): install, sign-ins, LMS connection, start the agent | Install part verified on a clean PC; the sign-in, LMS and start steps not yet |
 | Google Colab through the browser (`colab-mcp`) | Experimental, not yet verified |
 | Codex, macOS, Linux | Implemented, not yet verified |
 

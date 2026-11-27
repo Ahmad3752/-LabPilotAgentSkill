@@ -9,10 +9,13 @@
   - Writes a small labpilot.cmd shim to %LOCALAPPDATA%\labpilot\bin.
   - Optionally downloads Playwright's Chromium (needed for screenshots) and adds the shim folder to
     your *user* PATH (only with -AddToPath).
-  - Optionally installs the LabPilot skill for Codex/Claude Code (labpilot setup).
+  - Installs the LabPilot skill for Codex/Claude Code and the Google Colab CLI (labpilot setup).
+  - Signs you in to Google Colab and to the NUST LMS (each tool's own prompt, in this terminal; LabPilot
+    never sees a password), connects the LMS to your agent, then opens the agent in -ProjectDir asking
+    for new labs. Rerunning skips what is already done.
 
 .EXAMPLE
-  .\scripts\install.ps1 -Agent codex -ProjectDir C:\Labs -InstallBrowser -AddToPath
+  .\scripts\install.ps1 -Agent both -ProjectDir C:\Labs -InstallBrowser -AddToPath -Yes
 #>
 [CmdletBinding()]
 param(
@@ -22,7 +25,9 @@ param(
   [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "labpilot"),
   [switch]$InstallBrowser,
   [switch]$AddToPath,
-  [switch]$Yes
+  [switch]$Yes,
+  [switch]$NoLms,    # skip the NUST LMS connection
+  [switch]$NoStart   # do not open the agent at the end
 )
 $ErrorActionPreference = "Stop"
 $Repo = Split-Path -Parent $PSScriptRoot
@@ -90,9 +95,25 @@ if ($AddToPath) {
   Write-Host "Not changing PATH. Either rerun with -AddToPath, or call: $shim"
 }
 
+New-Item -ItemType Directory -Force $ProjectDir | Out-Null
 if ($Agent -ne "none") {
-  & $shim setup --agent $Agent --scope $Scope --project-dir $ProjectDir
+  & $shim setup --agent $Agent --scope $Scope --project-dir $ProjectDir --backend colab-cli --install-colab-cli
 }
-& $shim doctor
-Write-Host "`nDone. In VS Code, open your lab folder and ask your agent:" -ForegroundColor Green
-Write-Host "  Use LabPilot to work through the lab in this folder, run the code, collect screenshots, and prepare the original Word document with answers for my review."
+$state = (& $shim doctor --json --project-dir $ProjectDir) -join "`n" | ConvertFrom-Json
+if (-not $state.colab_cli.authenticated) {
+  Write-Host "`nSign in to Google Colab (once):" -ForegroundColor Cyan
+  & $shim colab-login
+}
+if (-not $NoLms) {
+  Write-Host "`nConnect the NUST LMS (once), so your agent can find new labs:" -ForegroundColor Cyan
+  & $shim lms connect
+}
+& $shim doctor --project-dir $ProjectDir
+
+$prompt = "Use LabPilot: are there any new labs on the LMS?"
+$start = if ($Agent -eq "claude") { "claude" } elseif ($Agent -ne "none") { "codex" } else { $null }
+Write-Host "`nDone. Next time: cd $ProjectDir; $start   and ask: $prompt" -ForegroundColor Green
+if ($start -and -not $NoStart -and (Get-Command $start -ErrorAction SilentlyContinue)) {
+  Set-Location $ProjectDir
+  & $start $prompt
+}

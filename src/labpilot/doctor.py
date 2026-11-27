@@ -16,7 +16,7 @@ from labpilot.adapters.colab_cli import AUTH_HINTS, ColabCliBackend
 from labpilot.agents import skill_status, skill_targets
 from labpilot.config import load_config
 from labpilot.documents.validate import find_renderer, find_word
-from labpilot.errors import strip_ansi
+from labpilot.errors import ErrorCode, ExitCode, LabPilotError, strip_ansi
 from labpilot.procutil import run_cmd
 from labpilot.security import redact_obj
 
@@ -49,8 +49,17 @@ def mcp_registration() -> dict[str, Any]:
             "note": "Tool availability can only be confirmed by the host agent (dynamic tools)."}
 
 
-def nuts_lms() -> dict[str, Any]:
-    """Nuts LMS MCP (moodle-mcp): installed, signed in (token file exists; never read), registered with an agent."""
+NUTS_LMS_SOURCE = "git+https://github.com/deeznust42/nutslms-mcp"
+
+
+def _show(argv: list[str]) -> str:
+    """An argv list as a command to paste (PowerShell or POSIX shell); a quoted first word needs `&` in PowerShell."""
+    words = [f'"{a}"' if any(c in a for c in " /\\") else a for a in argv]
+    return ("& " if words[0].startswith('"') and sys.platform == "win32" else "") + " ".join(words)
+
+
+def _lms_state() -> dict[str, Any]:
+    """What is missing for the Nuts LMS MCP (moodle-mcp), with each missing step as an argument list."""
     import os
 
     # On Windows, Smart App Control can block uv's unsigned moodle-mcp.exe launcher; the tool's own
@@ -83,26 +92,73 @@ def nuts_lms() -> dict[str, Any]:
     codex_tls = "OPENSSL_CONF" in codex_text  # shortcut: any OPENSSL_CONF in the file counts; parse TOML if it misleads
     if codex_reg:
         where.append("codex:config.toml")
-    run = f'"{tool_py}" -m moodle_mcp' if use_py else "moodle-mcp"
+    run = [str(tool_py), "-m", "moodle_mcp"] if use_py else ["moodle-mcp"]
     # lms.nust.edu.pk needs legacy TLS renegotiation, which moodle-mcp does not enable yet (see lms_openssl.cnf)
     cnf = Path(__file__).with_name("lms_openssl.cnf")
-    login = (f'$env:OPENSSL_CONF="{cnf}"; & {run} login' if use_py
-             else f'$env:OPENSSL_CONF="{cnf}"; {run} login' if sys.platform == "win32"
-             else f'OPENSSL_CONF="{cnf}" {run} login')
-    steps = []
-    for agent, reg, tls, flag in (("claude", claude_reg, claude_tls, "-e"), ("codex", codex_reg, codex_tls, "--env")):
+    register: list[list[str]] = []
+    for agent, reg, tls, flag, scope in (("claude", claude_reg, claude_tls, "-e", ["-s", "user"]),
+                                         ("codex", codex_reg, codex_tls, "--env", [])):
         if shutil.which(agent) and not (reg and tls):
-            add = f'{agent} mcp add moodle {flag} OPENSSL_CONF="{cnf}" -- {run} serve'
-            steps.append(f"{agent} mcp remove moodle; {add}" if reg else add)
+            if reg:
+                register.append([agent, "mcp", "remove", "moodle", *scope])
+            # user scope: the agent sees the LMS from any folder (C:\Labs), not only the one it was registered in
+            register.append([agent, "mcp", "add", *scope, "moodle", flag, f"OPENSSL_CONF={cnf}", "--", *run, "serve"])
+    return {"exe": exe, "signed_in": signed_in, "where": where, "tls_workaround": claude_tls or codex_tls,
+            "run": run, "cnf": cnf, "register": register}
+
+
+def nuts_lms() -> dict[str, Any]:
+    """Nuts LMS MCP (moodle-mcp): installed, signed in (token file exists; never read), registered with an agent."""
+    s = _lms_state()
+    env = f'$env:OPENSSL_CONF="{s["cnf"]}";' if sys.platform == "win32" else f'OPENSSL_CONF="{s["cnf"]}"'
+    login = f"{env} {_show([*s['run'], 'login'])}"
     fix = None
-    if not exe:
-        fix = "uv tool install git+https://github.com/deeznust42/nutslms-mcp"
-    elif not signed_in:
-        fix = f"Run `{login}` in your own terminal (LabPilot never asks for your LMS password)."
-    elif steps:
-        fix = "; ".join(steps) + "   (then restart the agent)"
-    return {"installed": bool(exe), "signed_in": signed_in, "registered": bool(where), "where": where,
-            "tls_workaround": claude_tls or codex_tls, "ready": bool(exe and signed_in and where), "fix": fix}
+    if not s["exe"]:
+        fix = f"labpilot lms connect   (or: uv tool install {NUTS_LMS_SOURCE})"
+    elif not s["signed_in"]:
+        fix = f"labpilot lms connect   (or run `{login}` in your own terminal; LabPilot never sees your LMS password)"
+    elif s["register"]:
+        fix = "labpilot lms connect   (or: " + "; ".join(map(_show, s["register"])) + ")   then restart the agent"
+    return {"installed": bool(s["exe"]), "signed_in": s["signed_in"], "registered": bool(s["where"]),
+            "where": s["where"], "tls_workaround": s["tls_workaround"],
+            "ready": bool(s["exe"] and s["signed_in"] and s["where"]), "fix": fix}
+
+
+def connect_lms() -> dict[str, Any]:
+    """Install, sign in to and register the Nuts LMS MCP, doing only the steps still missing (rerunnable).
+
+    The sign-in is moodle-mcp's own prompt in this terminal: LabPilot neither reads nor stores the password."""
+    import os
+    import subprocess
+
+    s = _lms_state()
+    if not s["exe"]:
+        uv = shutil.which("uv")
+        if uv is None:  # uv's PyPI wheel brings the binary; `python -m uv` runs it without touching PATH
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--disable-pip-version-check", "uv"], check=True)
+        # --python: reuse this (signed python.org) interpreter instead of letting uv download an unsigned one
+        subprocess.run([*([uv] if uv else [sys.executable, "-m", "uv"]), "tool", "install", "--python", sys.executable,
+                        NUTS_LMS_SOURCE], check=True)
+        s = _lms_state()
+        if not s["exe"]:
+            raise LabPilotError(ErrorCode.MCP_UNAVAILABLE, "moodle-mcp was installed but is not on PATH yet.",
+                                exit_code=ExitCode.CONFIG, next_action="Open a new terminal and run: labpilot lms connect")
+    if not s["signed_in"]:
+        if not sys.stdin.isatty():
+            raise LabPilotError(ErrorCode.AUTH_REQUIRED, "Signing in to the LMS needs your own terminal.",
+                                exit_code=ExitCode.CONFIG, next_action="Run in your own terminal: labpilot lms connect")
+        print("Sign in to your LMS. You type your password into moodle-mcp's own prompt; LabPilot does not see it.",
+              file=sys.stderr, flush=True)
+        subprocess.call([*s["run"], "login"], env={**os.environ, "OPENSSL_CONF": str(s["cnf"])})
+        s = _lms_state()
+        if not s["signed_in"]:
+            raise LabPilotError(ErrorCode.AUTH_REQUIRED, "LMS sign-in did not finish.", exit_code=ExitCode.CONFIG,
+                                next_action="Run again: labpilot lms connect")
+    for argv in s["register"]:
+        exe = shutil.which(argv[0]) or argv[0]  # codex/claude may be .cmd shims on Windows
+        # check=False: `mcp remove` fails harmlessly when the entry lives in another scope
+        subprocess.run([exe, *argv[1:]], check=False)
+    return nuts_lms()
 
 
 def _browser() -> dict[str, Any]:

@@ -133,7 +133,8 @@ def doctor(json_out: bool = JSON_OPT, project_dir: Path = typer.Option(Path.cwd,
         lines.append(f"{mark(r['colab_mcp']['registered'])}colab-mcp: {r['colab_mcp']['detail']}")
         lm = r["nuts_lms"]
         lines.append(f"{mark(lm['ready'])}Nuts LMS MCP (optional, new-lab checks): "
-                     + ("ready" if lm["ready"] else "") + (f" next: {lm['fix']}" if lm["fix"] else ""))
+                     + (f"ready ({', '.join(sorted({w.split(':')[0] for w in lm['where']}))})" if lm["ready"] else "not ready")
+                     + (f"; next: {lm['fix']}" if lm["fix"] else ""))
         pr = r["page_renderer"]
         lines.append(f"{mark(pr['available'])}Word page rendering (optional): {pr['kind'] or 'none'}")
         lines.append(f"ready: colab={r['ready_for_colab']} local fallback={r['ready_for_local_fallback']}")
@@ -582,6 +583,15 @@ def lms_mark(
     from labpilot import lms
 
     _run(lambda: lms.mark_lab(assign_id, state, site=site, run_id=run_id, name=name), json_out)
+
+
+@lms_app.command("connect")
+def lms_connect(json_out: bool = JSON_OPT) -> None:
+    """Install the Nuts LMS MCP, sign in (its own prompt, in this terminal) and connect it to Codex and Claude."""
+    from labpilot.doctor import connect_lms
+
+    _run(connect_lms, json_out, lambda r: "Nuts LMS MCP: ready (restart your agent)" if r["ready"] and not r["fix"]
+         else f"Nuts LMS MCP: not ready. next: {r['fix']}")
 
 
 @lms_app.command("list")

@@ -18,6 +18,7 @@ Last updated: 2026-11-27.
 | 2026-11-27 | Colab check first: LabPilot decides from the Word manual whether a lab can be done in Colab. Not Python notebook code (Java programs, AWS or cloud consoles, Docker or terminal labs) means it tells the user and stops. | The user wants every lab to start with "can Colab do this?". The check was calibrated on Labs 1–11. |
 | 2026-11-27 | The agent always asks "I found <lab>. Should I do it for you?" before fetching, and asks for Colab permission on every run. | User decision: no standing consent, and no fetching without asking. |
 | 2026-11-27 | Terminal or Docker labs (like Lab 11, Kafka) are out of scope for now. | The user will discuss them later. Feasible with tmux `send-keys`/`capture-pane`, but it needs a Linux and Docker host, which reopens "Colab only". |
+| 2026-11-27 | One-command setup: `install.ps1` installs everything, runs the Google and LMS sign-ins (each tool's own prompt in the user's terminal), connects the LMS to Codex and Claude Code, and opens the agent asking for new labs. | User: "as soon as a person downloads it, it configures moodle-mcp, logins, Colab, and starts". LabPilot still never reads or stores a password. |
 | standing | Commit and push to `Ahmad3752/-LabPilotAgentSkill` after each tested step. | User preference. |
 
 ## Waiting on something
@@ -28,19 +29,21 @@ Last updated: 2026-11-27.
 
 ## Next steps (in order; proposed unless marked agreed)
 
-1. The user's real-world test (agreed): a fresh Codex or Claude Code session started in `C:\Labs` runs the LMS flow from the README ("any new labs?" → "do Lab 1"); Lab 1 is a closed Colab lab, fine for testing. That verifies the one-prompt flow, Codex, LMS downloads and `lms stage`. Codex needs `moodle` registered in its own config with `OPENSSL_CONF` to see the LMS.
+1. The user's real-world test (agreed): run `labpilot lms connect` once (connects Codex), then a fresh Codex or Claude Code session started in `C:\Labs` runs the LMS flow from the README ("any new labs?" → "do Lab 1"); Lab 1 is a closed Colab lab, fine for testing. That verifies the one-prompt flow, Codex, LMS downloads and `lms stage`. Codex needs `moodle` registered in its own config with `OPENSSL_CONF` to see the LMS.
 2. Grilling questions still open: is v1 done when a classmate on Windows gets a Completed lab from one prompt in Claude Code? Is the audience the user plus classmates via GitHub?
 3. Check that the skill is discovered in a fresh Claude Code session (still unverified; any new session can check it).
 
 ## Machine gotchas (this Windows 11 PC)
 
-- Tests: the default temp dir is blocked. Pass `--basetemp <scratch dir>` to pytest. Expect 112 passed and 2 skipped (opt-in Colab, symlinks).
+- Tests: the default temp dir is blocked. Pass `--basetemp <scratch dir>` to pytest. Expect 113 passed and 2 skipped (opt-in Colab, symlinks).
 - Smart App Control blocks unsigned `.exe` launchers, so `moodle-mcp` runs as `"%APPDATA%\uv\tools\nutslms-mcp\Scripts\python.exe" -m moodle_mcp`.
 - The Colab CLI 0.8.0 is installed in a LabPilot-owned venv and signed in. `labpilot doctor --json` shows it.
 - `gh` is not installed, so pull requests are opened in the browser.
 - `docs/INTERVIEW_PREP.md` is the user's personal interview prep. It is deliberately left uncommitted.
 
 ## Session log (newest first; keep the last five)
+
+- **2026-11-27:** One-command install: `labpilot lms connect` (install, moodle-mcp's own login prompt, registration with Codex and Claude Code at user scope) and `install.ps1` now runs `colab-login`, `lms connect` and starts the agent with the first prompt. Doctor's LMS line says which agents are connected. The full one-command run on a clean PC is not verified yet.
 
 - **2026-11-27:** The LMS is now the main way to start a lab in the README ("any new labs?" → pick one → fetch → Colab check → solve). `doctor` prints the LMS registration for Codex and Claude with real paths (the `~` redaction is fixed), a valid PowerShell login command (`& "…python.exe"`), and finds `moodle-mcp` even when uv's bin is not on PATH. Naming a lab ("do Lab 1") uses `--include-past`.
 
@@ -49,7 +52,3 @@ Last updated: 2026-11-27.
 - **2026-11-27:** Added the Colab check (`colab_fit` in `init`/`inspect`, plus `labpilot colab-check`), calibrated on the real CS-412 Labs 1–11, which all came out correct. The skill now checks Colab first and asks "should I do it?". Fixed the LMS download instruction: `dest` must be a file path.
 
 - **2026-11-27 (after restart):** The `moodle` MCP works with the TLS workaround. Ran the first real read-only `lms check`: 19 assignments, 1 new lab (Lab 11), all classified correctly. Nothing downloaded or submitted.
-
-- **2026-11-27:** Diagnosed the LMS TLS failure. Added the `lms_openssl.cnf` workaround with a `doctor` check, re-registered `moodle`, and verified login and the course list with the real account. Prepared the upstream PR branch. Added this file.
-- **2026-11-26:** Wrote the README from the status file. Removed the WSL path. Wrote the interview prep doc and ran grilling rounds on what to do next.
-- **2026-11-26:** Added `labpilot clean` and `labpilot lms` (Nuts LMS MCP).
