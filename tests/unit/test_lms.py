@@ -178,22 +178,41 @@ def test_doctor_nuts_lms(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     home.mkdir()
     monkeypatch.setattr(doctor.Path, "home", classmethod(lambda cls: home))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))  # no uv tool install here
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(doctor.shutil, "which", lambda name: None)
     assert doctor.nuts_lms()["fix"].startswith("uv tool install")
-    monkeypatch.setattr(doctor.shutil, "which", lambda name: "/bin/moodle-mcp")
-    assert re.search(r"moodle[-_]mcp login", doctor.nuts_lms()["fix"])  # `-m moodle_mcp` form on Windows
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/bin/{name}")  # moodle-mcp, claude and codex
+    assert re.search(r"moodle[-_]mcp login", doctor.nuts_lms()["fix"])
     (tmp_path / "cache" / "moodle-mcp").mkdir(parents=True)
     (tmp_path / "cache" / "moodle-mcp" / "lms.x.edu.token.json").write_text("{}")
     fix = doctor.nuts_lms()["fix"]
-    assert "claude mcp add" in fix and "OPENSSL_CONF" in fix
+    assert "claude mcp add moodle -e OPENSSL_CONF" in fix and "codex mcp add moodle --env OPENSSL_CONF" in fix
     (home / ".claude.json").write_text(json.dumps({"mcpServers": {"moodle": {"command": "moodle-mcp", "args": ["serve"]}}}))
     r = doctor.nuts_lms()
-    assert r["ready"] is True and r["tls_workaround"] is False and r["fix"].startswith("claude mcp remove moodle")
+    assert r["ready"] is True and r["tls_workaround"] is False and r["fix"].startswith("claude mcp remove moodle;")
     (home / ".claude.json").write_text(json.dumps({"mcpServers": {"moodle": {
         "command": "moodle-mcp", "args": ["serve"], "env": {"OPENSSL_CONF": "x.cnf"}}}}))
     r = doctor.nuts_lms()
-    assert r["tls_workaround"] is True and r["fix"] is None
+    assert r["tls_workaround"] is True and r["fix"].startswith("codex mcp add moodle")  # Codex still missing
+    (home / ".codex").mkdir()
+    (home / ".codex" / "config.toml").write_text(
+        '[mcp_servers.moodle]\ncommand = "moodle-mcp"\nargs = ["serve"]\nenv = { OPENSSL_CONF = "x.cnf" }\n')
+    assert doctor.nuts_lms()["fix"] is None
+
+
+def test_windows_login_command_is_valid_powershell(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from labpilot import doctor
+
+    tool_py = tmp_path / "uv" / "tools" / "nutslms-mcp" / "Scripts" / "python.exe"
+    tool_py.parent.mkdir(parents=True)
+    tool_py.write_text("")
+    monkeypatch.setattr(doctor.sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: None)  # uv's bin not on PATH: still found
+    r = doctor.nuts_lms()
+    assert r["installed"] is True and f'& "{tool_py}" -m moodle_mcp login' in r["fix"]
 
 
 def test_colab_check_reads_saved_read_document_result(tmp_path: Path) -> None:

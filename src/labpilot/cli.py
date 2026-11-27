@@ -133,7 +133,7 @@ def doctor(json_out: bool = JSON_OPT, project_dir: Path = typer.Option(Path.cwd,
         lines.append(f"{mark(r['colab_mcp']['registered'])}colab-mcp: {r['colab_mcp']['detail']}")
         lm = r["nuts_lms"]
         lines.append(f"{mark(lm['ready'])}Nuts LMS MCP (optional, new-lab checks): "
-                     + ("ready" if lm["ready"] else lm["fix"]))
+                     + ("ready" if lm["ready"] else "") + (f" next: {lm['fix']}" if lm["fix"] else ""))
         pr = r["page_renderer"]
         lines.append(f"{mark(pr['available'])}Word page rendering (optional): {pr['kind'] or 'none'}")
         lines.append(f"ready: colab={r['ready_for_colab']} local fallback={r['ready_for_local_fallback']}")

@@ -28,20 +28,21 @@ Last updated: 2026-11-27.
 
 ## Next steps (in order; proposed unless marked agreed)
 
-1. The user's real-world test (agreed): on the next Colab lab, a fresh Codex or Claude Code session runs the whole flow from one prompt. That verifies the one-prompt flow, Codex, LMS downloads and `lms stage`. Codex needs `moodle` registered in its own config with `OPENSSL_CONF` to see the LMS.
-2. `doctor` redacts the home folder to `~` inside the commands it prints, and a quoted `"~\AppData\..."` path fails when pasted into PowerShell. Print real paths in the `fix` commands.
-3. Grilling questions still open: is v1 done when a classmate on Windows gets a Completed lab from one prompt in Claude Code? Is the audience the user plus classmates via GitHub?
-4. Check that the skill is discovered in a fresh Claude Code session (still unverified; any new session can check it).
+1. The user's real-world test (agreed): a fresh Codex or Claude Code session started in `C:abs` runs the lms flow from the readme ("any new labs?" → "do lab 1"); lab 1 is a closed colab lab, fine for testing. That verifies the one-prompt flow, Codex, LMS downloads and `lms stage`. Codex needs `moodle` registered in its own config with `OPENSSL_CONF` to see the LMS.
+2. Grilling questions still open: is v1 done when a classmate on Windows gets a Completed lab from one prompt in Claude Code? Is the audience the user plus classmates via GitHub?
+3. Check that the skill is discovered in a fresh Claude Code session (still unverified; any new session can check it).
 
 ## Machine gotchas (this Windows 11 PC)
 
-- Tests: the default temp dir is blocked. Pass `--basetemp <scratch dir>` to pytest. Expect 111 passed and 2 skipped (opt-in Colab, symlinks).
+- Tests: the default temp dir is blocked. Pass `--basetemp <scratch dir>` to pytest. Expect 112 passed and 2 skipped (opt-in Colab, symlinks).
 - Smart App Control blocks unsigned `.exe` launchers, so `moodle-mcp` runs as `"%APPDATA%\uv\tools\nutslms-mcp\Scripts\python.exe" -m moodle_mcp`.
 - The Colab CLI 0.8.0 is installed in a LabPilot-owned venv and signed in. `labpilot doctor --json` shows it.
 - `gh` is not installed, so pull requests are opened in the browser.
 - `docs/INTERVIEW_PREP.md` is the user's personal interview prep. It is deliberately left uncommitted.
 
 ## Session log (newest first; keep the last five)
+
+- **2026-11-27:** The LMS is now the main way to start a lab in the README ("any new labs?" → pick one → fetch → Colab check → solve). `doctor` prints the LMS registration for Codex and Claude with real paths (the `~` redaction is fixed), a valid PowerShell login command (`& "…python.exe"`), and finds `moodle-mcp` even when uv's bin is not on PATH. Naming a lab ("do Lab 1") uses `--include-past`.
 
 - **2026-11-27:** First full clean run of `install.ps1`, which works. Rewrote the README quick start so a friend can follow it from a terminal: `-ExecutionPolicy Bypass`, a new terminal after the PATH change, starting the agent in `C:\Labs`, both Codex and Claude, and a note that ChatGPT cannot run it.
 

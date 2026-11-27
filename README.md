@@ -58,18 +58,33 @@ labpilot colab-login        # opens Google sign-in; paste the code it gives you 
 labpilot doctor             # the last line should say: ready: colab=True
 ```
 
-**3. Do a lab.** Put the manual (`.docx`) and its data files in their own folder, for example `C:\Labs\Lab 1\`. Then start your agent **from `C:\Labs`**, where the skill is installed:
+**3. Connect the NUST LMS once** (optional, so the agent can find and download labs itself). This uses the [Nuts LMS MCP](https://github.com/deeznust42/nutslms-mcp); you sign in in your own terminal, and LabPilot never sees your password:
+
+```powershell
+python -m pip install uv
+uv tool install git+https://github.com/deeznust42/nutslms-mcp
+labpilot doctor     # the "Nuts LMS MCP" line prints the next command: first the login, then the
+                    # registration for Codex and/or Claude. Run it, run doctor again, repeat until it says ready.
+```
+
+**4. Do a lab.** Start your agent **from `C:\Labs`**, where the skill is installed:
 
 ```powershell
 cd C:\Labs
 codex          # or: claude
 ```
 
-and ask:
+With the LMS connected, ask:
+
+> Use LabPilot: are there any new labs on the LMS?
+
+The agent lists your open labs and says which ones can be done in Google Colab. Answer with the one you want, for example "do Lab 1" (older labs work too). It downloads it, asks before using Colab and uploading the files, and solves it.
+
+Without the LMS, put the manual (`.docx`) and its data files in a folder such as `C:\Labs\Lab 1\` and ask:
 
 > Use LabPilot to do the lab in the "Lab 1" folder on Google Colab.
 
-The agent first checks whether the lab can be done in Colab (it stops and says why if not, e.g. an AWS or Docker lab), then asks before using Colab and uploading your files. In Codex, approve its requests to run commands with network access: Colab needs the internet.
+Either way, the agent first checks whether the lab can be done in Colab, and stops with the reason if not (e.g. an AWS or Docker lab). In Codex, approve its requests to run commands with network access: Colab and the LMS need the internet. LabPilot never submits anything: you review the Word file and submit it yourself.
 
 ### Try it without an agent
 

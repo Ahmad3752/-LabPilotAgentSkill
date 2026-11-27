@@ -37,7 +37,8 @@ folder, then pass the file to LabPilot. Never edit, merge or invent tool output.
    - `needs_status`: call `assignment_status(assignid)` for each id and save each result as
      `.labpilot/lms/status-<assignid>.json`. Rerun check with `--status <file>` for each.
    - `--match REGEX` if the course names labs differently, e.g. `"practical|experiment"`.
-     `--include-past` also lists labs whose deadline has passed.
+     `--include-past` also lists labs whose deadline has passed. Use it whenever the user names a lab
+     ("do Lab 1"), so an older lab is found too; then continue with only that lab.
    - `in_progress` lists labs already downloaded but not finished. Offer to resume them.
 4. **Colab check** for each new lab, before asking anything: find its manual (*Finding a lab's files* below), call
    `read_document(fileurl)`, save the result as `.labpilot/lms/manual-<assignid>.json`, then

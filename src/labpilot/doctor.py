@@ -53,7 +53,11 @@ def nuts_lms() -> dict[str, Any]:
     """Nuts LMS MCP (moodle-mcp): installed, signed in (token file exists; never read), registered with an agent."""
     import os
 
-    exe = shutil.which("moodle-mcp")
+    # On Windows, Smart App Control can block uv's unsigned moodle-mcp.exe launcher; the tool's own
+    # (signed python.org) interpreter running `-m moodle_mcp` works, and it exists even when uv's bin is not on PATH.
+    tool_py = Path(os.environ.get("APPDATA", "")) / "uv" / "tools" / "nutslms-mcp" / "Scripts" / "python.exe"
+    use_py = sys.platform == "win32" and tool_py.exists()
+    exe = shutil.which("moodle-mcp") or (str(tool_py) if use_py else None)
     cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "moodle-mcp"
     signed_in = any(cache.glob("*.token.json")) if cache.is_dir() else False
     where = []
@@ -72,30 +76,33 @@ def nuts_lms() -> dict[str, Any]:
         if entries:
             where.append(f"claude:{path.name}")
             tls_workaround = tls_workaround or any("OPENSSL_CONF" in (s.get("env") or {}) for s in entries)
+    claude_reg, claude_tls = bool(where), tls_workaround
     codex_cfg = Path.home() / ".codex" / "config.toml"
-    if codex_cfg.exists() and re.search(r"moodle[-_]mcp", codex_cfg.read_text(encoding="utf-8", errors="ignore")):
+    codex_text = codex_cfg.read_text(encoding="utf-8", errors="ignore") if codex_cfg.exists() else ""
+    codex_reg = bool(re.search(r"moodle[-_]mcp", codex_text))
+    codex_tls = "OPENSSL_CONF" in codex_text  # shortcut: any OPENSSL_CONF in the file counts; parse TOML if it misleads
+    if codex_reg:
         where.append("codex:config.toml")
-    # On Windows, Smart App Control can block uv's unsigned moodle-mcp.exe launcher; the tool's own
-    # (signed python.org) interpreter running `-m moodle_mcp` works.
-    run = "moodle-mcp"
-    tool_py = Path(os.environ.get("APPDATA", "")) / "uv" / "tools" / "nutslms-mcp" / "Scripts" / "python.exe"
-    if exe and sys.platform == "win32" and tool_py.exists():
-        run = f'"{tool_py}" -m moodle_mcp'
+    run = f'"{tool_py}" -m moodle_mcp' if use_py else "moodle-mcp"
     # lms.nust.edu.pk needs legacy TLS renegotiation, which moodle-mcp does not enable yet (see lms_openssl.cnf)
     cnf = Path(__file__).with_name("lms_openssl.cnf")
-    login = f'$env:OPENSSL_CONF="{cnf}"; {run} login' if sys.platform == "win32" else f'OPENSSL_CONF="{cnf}" {run} login'
-    add = f'claude mcp add moodle -e OPENSSL_CONF="{cnf}" -- {run} serve   (then restart the agent)'
+    login = (f'$env:OPENSSL_CONF="{cnf}"; & {run} login' if use_py
+             else f'$env:OPENSSL_CONF="{cnf}"; {run} login' if sys.platform == "win32"
+             else f'OPENSSL_CONF="{cnf}" {run} login')
+    steps = []
+    for agent, reg, tls, flag in (("claude", claude_reg, claude_tls, "-e"), ("codex", codex_reg, codex_tls, "--env")):
+        if shutil.which(agent) and not (reg and tls):
+            add = f'{agent} mcp add moodle {flag} OPENSSL_CONF="{cnf}" -- {run} serve'
+            steps.append(f"{agent} mcp remove moodle; {add}" if reg else add)
     fix = None
     if not exe:
         fix = "uv tool install git+https://github.com/deeznust42/nutslms-mcp"
     elif not signed_in:
         fix = f"Run `{login}` in your own terminal (LabPilot never asks for your LMS password)."
-    elif not where:
-        fix = add
-    elif any(w.startswith("claude:") for w in where) and not tls_workaround:
-        fix = "claude mcp remove moodle, then " + add
+    elif steps:
+        fix = "; ".join(steps) + "   (then restart the agent)"
     return {"installed": bool(exe), "signed_in": signed_in, "registered": bool(where), "where": where,
-            "tls_workaround": tls_workaround, "ready": bool(exe and signed_in and where), "fix": fix}
+            "tls_workaround": claude_tls or codex_tls, "ready": bool(exe and signed_in and where), "fix": fix}
 
 
 def _browser() -> dict[str, Any]:
@@ -192,4 +199,6 @@ def doctor(project_dir: Path | None = None) -> dict[str, Any]:
         problems.append("Google Colab not ready: configure the Colab CLI (labpilot setup --backend colab-cli) "
                         "or register colab-mcp in Claude Code; until then labs run on the local fallback")
     report["problems"] = problems
-    return redact_obj(report)
+    lms = report.pop("nuts_lms")
+    # the LMS fix holds commands the user pastes, so its paths must stay real (redaction would print "~\...")
+    return {**redact_obj(report), "nuts_lms": lms}
