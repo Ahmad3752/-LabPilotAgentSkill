@@ -4,7 +4,7 @@
 
 Your own coding agent (Claude Code or Codex) does the reasoning. LabPilot is the deterministic layer that executes, records and writes the document, and it never invents outputs, numbers or screenshots. No separate LLM API key is needed.
 
-> Status: working on Windows 11 with Google Colab (official `google-colab-cli`) and a local Jupyter fallback, and verified end to end on a real course lab. See [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what is verified and what is not.
+> Status: working on Windows 11 with Google Colab (official `google-colab-cli`), and verified end to end on a real course lab. See [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what is verified and what is not.
 
 ## How it works
 
@@ -18,7 +18,7 @@ Host agent (Claude Code / Codex) ── reads skills/labpilot/SKILL.md, plans ta
 labpilot CLI ── inspect .docx → validate plan → build notebook → execute → screenshots → fill Word copy → evaluate
         │
         ▼
-Google Colab (google-colab-cli)  or  local Jupyter kernel (fallback)
+Google Colab (google-colab-cli): all lab code runs here
 ```
 
 Output, next to your lab files:
@@ -71,12 +71,12 @@ Without the LMS, put the manual (`.docx`) and its data files in a folder such as
 
 > Use LabPilot to do the lab in the "Lab 1" folder on Google Colab.
 
-Either way, the agent first checks whether the lab can be done in Colab, and stops with the reason if not (e.g. an AWS or Docker lab). In Codex, approve its requests to run commands with network access: Colab and the LMS need the internet. LabPilot never submits anything: you review the Word file and submit it yourself.
+Either way, the agent first checks whether the lab can be done in Colab, and stops with the reason if not (e.g. an AWS or Docker lab). **In Codex:** the first time Codex opens `C:\Labs` it asks whether to trust the folder. Answer yes: that is where LabPilot's setup tells Codex to let `labpilot` run outside its sandbox (the "Approve for me" mode). If Codex still says LabPilot cannot run, type `/permissions` and pick **Approve for me**. LabPilot never submits anything: you review the Word file and submit it yourself.
 
 ### Try it without an agent
 
 ```bash
-python examples/run_demo.py <empty-folder>                       # local kernel
+python examples/run_demo.py <empty-folder>                       # local kernel (demo and tests only)
 python examples/run_demo.py <empty-folder> --backend colab-cli   # real Colab, your account
 ```
 
@@ -89,14 +89,17 @@ This runs a synthetic sample lab through the real CLI with known agent files.
 | Checking first whether a lab can be done in Colab, and saying why not (e.g. AWS, Docker or terminal labs) | Verified on 11 real manuals |
 | Reading `.docx` manuals (tasks, "Question N", answer boxes, fill-in tables, starter code, images) | Verified |
 | Google Colab via `google-colab-cli` 0.8.0, native Windows | Verified on real Colab |
-| Local Jupyter fallback | Verified |
+| Lab code on Colab only (no local fallback; sign-in required) | Verified with unit tests |
+| `labpilot finish`: one command after the agent writes the plan, code and answers | Verified offline (demo, fake Colab CLI); not yet on real Colab |
+| Running inside Codex without the sandbox blocking it (rule file + "Approve for me") | Verified by hand in real Codex; the automatic setup is unit-tested |
 | Crash, cancel and missing-data recovery (`resume`) | Verified |
 | Screenshots (headless Chromium renderings of the executed notebook) | Verified |
 | Filling a copy of the Word manual, plus quality review (`evaluate`) | Verified |
 | Checking the university LMS for new labs (Nuts LMS MCP, read-only) | Verified with a real account (finding labs); downloads not yet verified |
 | One-command Windows installer (`scripts/install.ps1`): install, sign-ins, LMS connection, start the agent | Install part verified on a clean PC; the sign-in, LMS and start steps not yet |
 | Google Colab through the browser (`colab-mcp`) | Experimental, not yet verified |
-| Codex, macOS, Linux | Implemented, not yet verified |
+| A full lab from one prompt in Codex | Next test |
+| macOS, Linux | Implemented, not yet verified |
 
 Screenshots are renderings of the executed notebook, not captures of the Colab web page. If a manual requires native Colab screenshots, LabPilot reports that as unmet instead of faking it.
 

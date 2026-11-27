@@ -5,7 +5,7 @@
 .DESCRIPTION
   - Finds Python 3.11+ (py launcher or python on PATH).
   - Creates an isolated environment in %LOCALAPPDATA%\labpilot\venv (rerun = upgrade).
-  - Installs LabPilot from this repository with the [lab] extras (pandas, matplotlib, pyarrow).
+  - Installs LabPilot from this repository (lab code runs on Google Colab, so no local pandas etc.).
   - Writes a small labpilot.cmd shim to %LOCALAPPDATA%\labpilot\bin.
   - Optionally downloads Playwright's Chromium (needed for screenshots) and adds the shim folder to
     your *user* PATH (only with -AddToPath).

@@ -1,6 +1,6 @@
 ---
 name: labpilot
-description: Work through a Google Colab programming lab manual (.docx) and its datasets end to end. Plans the tasks, writes and runs the notebook code in Google Colab (or a local Jupyter fallback), captures real screenshots, and fills a COPY of the original Word file with evidence and grounded answers. Can also check the university LMS (Moodle, via the Nuts LMS MCP) for new labs and download them. Use when the user asks to do, run, complete or prepare a lab, lab manual, assignment notebook or lab report from a Word document, or asks whether there is a new lab on the LMS.
+description: Work through a Google Colab programming lab manual (.docx) and its datasets end to end. Plans the tasks, writes and runs the notebook code in Google Colab (Colab only), captures real screenshots, and fills a COPY of the original Word file with evidence and grounded answers. Can also check the university LMS (Moodle, via the Nuts LMS MCP) for new labs and download them. Use when the user asks to do, run, complete or prepare a lab, lab manual, assignment notebook or lab report from a Word document, or asks whether there is a new lab on the LMS.
 license: MIT
 compatibility: Needs the `labpilot` CLI (Python 3.11+, headless Chromium). Google Colab via the official google-colab-cli or colab-mcp. LMS checks need the Nuts LMS MCP (moodle-mcp).
 ---
@@ -42,7 +42,8 @@ never handle the LMS password.
    **Colab check first:** read `inspection.colab_fit`. If `colab_ok` is false, tell the user
    "<lab> cannot be done in Google Colab: <reason>" and stop. Confirm the verdict from the manual yourself: a lab
    written for Colab, or plain Python notebook code, is a Colab lab; Java programs, AWS or other cloud consoles,
-   Docker or several live terminals are not.
+   Microsoft SQL Server/SSMS, Docker or several live terminals are not (sqlite3 is fine). For each item in
+   `colab_fit.needs_attention` (`files.upload()`, `drive.mount(`), upload the files with LabPilot instead of using it.
 2. Read `.labpilot/runs/<id>/document.json` and `draft_plan.json`. Look at extracted images in
    `document_images/` when the text is not enough. If a task exists only in an unreadable figure, flag it; do not invent it.
 3. Write `plan.json` (start from the draft): every task part, every observation question with an id and

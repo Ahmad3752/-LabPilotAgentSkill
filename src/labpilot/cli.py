@@ -283,7 +283,8 @@ def colab_check(file: Path, json_out: bool = JSON_OPT) -> None:
             text = file.read_text(encoding="utf-8-sig")
         return {"file": file.name, **colab_fit(text)}
 
-    _run(do, json_out, lambda r: f"{'Colab: yes' if r['colab_ok'] else 'Colab: NO'} - {r['reason']}")
+    _run(do, json_out, lambda r: f"{'Colab: yes' if r['colab_ok'] else 'Colab: NO'} - {r['reason']}"
+         + "".join(f"\n  needs attention: {n}" for n in r.get("needs_attention", [])))
 
 
 @app.command()
