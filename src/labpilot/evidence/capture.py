@@ -170,20 +170,17 @@ def _capture_cell(
     base = f"{n:02d}"
 
     targets: list[tuple[str, dict[str, float], int, int]] = []  # kind, clip, part, parts
-    if box["height"] <= MAX_CHUNK_CSS_H or not outputs:
+    if box["height"] > MAX_CHUNK_CSS_H:  # too tall for one readable Word page: code and output in parts
+        code_chunks = _input_chunks(cell)
+        for i, clip in enumerate(code_chunks, start=1):
+            targets.append(("code", clip, i, len(code_chunks)))
+        out_chunks = _output_chunks(cell) if outputs else []
+        for i, clip in enumerate(out_chunks, start=1):
+            targets.append(("output", clip, i, len(out_chunks)))
+    if not targets:
         clip = dict(box)
         clip["width"] = _content_width(cell, box["x"], box["width"])
         targets.append(("code-output", clip, 1, 1))
-    else:
-        inp_loc = cell.locator(".jp-Cell-inputWrapper").first
-        inp = inp_loc.bounding_box()
-        if inp:
-            inp = dict(inp)
-            inp["width"] = _content_width(inp_loc, inp["x"], inp["width"])
-            targets.append(("code", inp, 1, 1))
-        chunks = _output_chunks(cell, page)
-        for i, clip in enumerate(chunks, start=1):
-            targets.append(("output", clip, i, len(chunks)))
 
     for kind, clip, part, parts in targets:
         suffix = f"-part{part}" if parts > 1 else ""
@@ -253,6 +250,32 @@ CUT_POINTS_JS = """el => {
 }"""
 
 
+# Top of the line box of every source line in a code input (the character after each newline), so a part
+# never starts or ends inside a source line, even when a long line is wrapped over several rows.
+LINE_STARTS_JS = r"""el => {
+  const ys = [];
+  el.querySelectorAll('pre').forEach(pre => {
+    const cs = getComputedStyle(pre); const r = pre.getBoundingClientRect();
+    let lh = parseFloat(cs.lineHeight); if (isNaN(lh)) lh = parseFloat(cs.fontSize) * 1.2;
+    ys.push(r.top, r.bottom);
+    const walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+    let lineStart = false; let node;
+    while ((node = walker.nextNode())) {
+      const s = node.textContent;
+      for (let i = 0; i < s.length; i++) {
+        if (s[i] === '\n') { lineStart = true; continue; }
+        if (!lineStart) continue;
+        lineStart = false;
+        const range = document.createRange(); range.setStart(node, i); range.setEnd(node, i + 1);
+        const rect = range.getClientRects()[0];
+        if (rect) ys.push(rect.top - Math.max(0, lh - rect.height) / 2);
+      }
+    }
+  });
+  return ys.map(y => y + window.scrollY);
+}"""
+
+
 def _content_width(locator: Any, x: float, max_width: float) -> float:
     try:
         right = float(locator.evaluate(CONTENT_RIGHT_JS))
@@ -261,15 +284,26 @@ def _content_width(locator: Any, x: float, max_width: float) -> float:
     return max(120.0, min(max_width, right - x + 24))
 
 
-def _output_chunks(cell: Any, page: Any) -> list[dict[str, float]]:
-    """Split the output area into chunks no taller than MAX_CHUNK_CSS_H, cutting only at safe boundaries."""
-    wrapper = cell.locator(".jp-Cell-outputWrapper").first
+def _input_chunks(cell: Any) -> list[dict[str, float]]:
+    """Split the code input at the starts of source lines; visual rows only for a single line longer than a page."""
+    return _chunks(cell.locator(".jp-Cell-inputWrapper").first, LINE_STARTS_JS, CUT_POINTS_JS)
+
+
+def _output_chunks(cell: Any) -> list[dict[str, float]]:
+    return _chunks(cell.locator(".jp-Cell-outputWrapper").first, CUT_POINTS_JS)
+
+
+def _chunks(wrapper: Any, cuts_js: str, fallback_js: str | None = None) -> list[dict[str, float]]:
+    """Split a rendered area into chunks no taller than MAX_CHUNK_CSS_H, cutting only at safe boundaries."""
+    if wrapper.count() == 0:
+        return []
     wbox = wrapper.bounding_box()
     if wbox is None:
         return []
     x, top, end = wbox["x"], wbox["y"], wbox["y"] + wbox["height"]
     width = _content_width(wrapper, x, wbox["width"])
-    cuts = sorted(set(round(float(y), 2) for y in wrapper.evaluate(CUT_POINTS_JS)))
+    cuts = sorted(set(round(float(y), 2) for y in wrapper.evaluate(cuts_js)))
+    fallback = sorted(set(round(float(y), 2) for y in wrapper.evaluate(fallback_js))) if fallback_js else []
     chunks: list[dict[str, float]] = []
     start = top
     while start < end - 1:
@@ -277,7 +311,7 @@ def _output_chunks(cell: Any, page: Any) -> list[dict[str, float]]:
         if limit >= end:
             stop = end
         else:
-            candidates = [c for c in cuts if start + 40 < c <= limit]
+            candidates = [c for c in cuts if start + 40 < c <= limit] or [c for c in fallback if start + 40 < c <= limit]
             stop = max(candidates) if candidates else limit  # no safe boundary: fixed band (rare: huge image)
         chunks.append({"x": x, "y": start, "width": width, "height": stop - start})
         start = stop

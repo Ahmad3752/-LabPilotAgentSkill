@@ -24,6 +24,7 @@ DXA_PER_INCH = 1440
 DEFAULT_CELL_MARGIN_DXA = 108
 CAPTURE_DPI = 96 * 2  # screenshots are captured at device scale 2
 MAX_IMAGE_HEIGHT_IN = 8.3
+MIN_READABLE_SCALE = 0.6  # of natural size: 13.5px notebook code stays >= ~6pt on paper; taller is captured in parts
 PLACEHOLDER_RE = re.compile(
     r"^\s*(\[.*\]|_{3,}|\.{3,}|"
     r"(paste|insert|add|write|put|attach)\b.*\b(here|code|screenshot|screenshots|output|outputs|answer|answers|solution)\b.*|"
@@ -170,13 +171,17 @@ def _picture(sink: _Sink, path: Path, rec: EvidenceRecord, avail_in: float, keep
     natural_w = rec.width / CAPTURE_DPI
     natural_h = rec.height / CAPTURE_DPI
     width = min(natural_w, avail_in)
+    too_tall = False
     if natural_h * (width / natural_w) > MAX_IMAGE_HEIGHT_IN:
         width = MAX_IMAGE_HEIGHT_IN * natural_w / natural_h
+        # the writer cannot split a screenshot without retouching evidence; capture splits it, so this flags old captures
+        too_tall = width / natural_w < MIN_READABLE_SCALE
     p = sink.paragraph()
     p.paragraph_format.keep_with_next = keep_with_next
     run = p.add_run()
     run.add_picture(str(path), width=Emu(int(width * EMU_PER_INCH)))
-    return {"path": rec.path, "sha256": rec.sha256, "width_in": round(width, 3), "task_id": rec.task_id}
+    info = {"path": rec.path, "sha256": rec.sha256, "width_in": round(width, 3), "task_id": rec.task_id}
+    return info | ({"too_tall": True} if too_tall else {})
 
 
 def display_heading(t: Task) -> str:
@@ -207,11 +212,17 @@ def _write_task(sink: _Sink, run_dir: Path, content: TaskContent, avail: float, 
         _text(sink, "What the code does:", content.explanation)
     for rec in content.evidence:
         what = {"code-output": "Code and output", "code": "Code", "output": "Output"}[rec.kind]
-        part = f", part {rec.part} of {rec.parts}" if rec.parts > 1 else ""
+        part = "" if rec.parts <= 1 else f"{'continued, ' if rec.part > 1 else ''}part {rec.part} of {rec.parts}; "
         report.figure_count += 1
         # caption BELOW its image and kept on the same page, so a caption can never be stranded above the wrong figure
-        report.inserted_images.append(_picture(sink, run_dir / rec.path, rec, avail, keep_with_next=True))
-        _label(sink, f"Figure {report.figure_count}: {what}{part} ({run_label})", keep_with_next=False)
+        info = _picture(sink, run_dir / rec.path, rec, avail, keep_with_next=True)
+        report.inserted_images.append(info)
+        _label(sink, f"Figure {report.figure_count}: {what} ({part}{run_label})", keep_with_next=False)
+        if info.get("too_tall"):
+            report.review_required.append(
+                f"Figure {report.figure_count} ({rec.path}) is too tall to read on one page; "
+                "re-run `labpilot capture` so it is captured in parts, then export again."
+            )
     if content.answers:
         _label(sink, "Observations", italic=False)
         for qtext, ans in content.answers:

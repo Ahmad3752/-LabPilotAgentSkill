@@ -131,3 +131,46 @@ def test_student_fields_only_when_supplied(python_lab: Path, tmp_path: Path) -> 
     texts = [p.text for p in docx.Document(str(out)).paragraphs]
     assert any(t.startswith("Name:") and "Test Student" in t for t in texts)
     assert any(t.startswith("CMS ID:") and t.strip().endswith("_") for t in texts)  # not supplied -> untouched
+
+
+def test_multi_part_evidence_is_inserted_in_order_with_captions(python_lab: Path, tmp_path: Path) -> None:
+    import hashlib
+
+    src, plan, contents = _setup(python_lab, tmp_path)
+    t = contents[1].task
+    parts = [_png(tmp_path / f"code-part{i}.png", 1500, 2100).model_copy(update={"task_id": t.id, "kind": "code",
+                                                                                "part": i, "parts": 2})
+             for i in (1, 2)]
+    out_rec = _png(tmp_path / "output.png", 900, 300).model_copy(update={"task_id": t.id, "kind": "output"})
+    contents[1] = TaskContent(task=t, explanation=None, evidence=[*parts, out_rec], answers=[], status="passed")
+    out = tmp_path / "parts.docx"
+    rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run X")
+    assert rep.review_required == []  # each part fits a page at a readable scale
+
+    d = docx.Document(str(out))
+    seq: list[str] = []
+    for p in d.tables[0].rows[1].cells[0].paragraphs:
+        blips = p._p.findall(".//" + qn("a:blip"))
+        if blips:
+            blob = d.part.related_parts[blips[0].get(qn("r:embed"))].blob
+            seq.append(hashlib.sha256(blob).hexdigest())
+            assert p.paragraph_format.keep_with_next  # an image stays on the page of its caption
+        elif p.text.startswith("Figure"):
+            seq.append(p.text)
+    i = seq.index(parts[0].sha256)
+    n = int(seq[i + 1].split(":")[0].split()[1])
+    assert seq[i : i + 6] == [
+        parts[0].sha256, f"Figure {n}: Code (part 1 of 2; run X)",
+        parts[1].sha256, f"Figure {n + 1}: Code (continued, part 2 of 2; run X)",
+        out_rec.sha256, f"Figure {n + 2}: Output (run X)",
+    ]
+
+
+def test_image_too_tall_to_read_is_flagged_not_silently_shrunk(python_lab: Path, tmp_path: Path) -> None:
+    src, plan, contents = _setup(python_lab, tmp_path)
+    t = contents[1].task
+    tall = _png(tmp_path / "tall.png", 1500, 4000).model_copy(update={"task_id": t.id})  # one old unsplit capture
+    contents[1] = TaskContent(task=t, explanation=None, evidence=[tall], answers=[], status="passed")
+    rep = write_document(source=src, out_path=tmp_path / "t.docx", run_dir=tmp_path, plan=plan, contents=contents,
+                         run_label="run X")
+    assert any("tall.png" in x and "labpilot capture" in x for x in rep.review_required)
