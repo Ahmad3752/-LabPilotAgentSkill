@@ -14,6 +14,7 @@ Last updated: 2026-11-27.
 | 2026-11-26 | WSL path for the Colab CLI removed. | The Colab CLI 0.8.0 runs natively on Windows (verified on real Colab), so the WSL code was untested and unused. |
 | 2026-11-26 | colab-mcp (browser Colab) skipped for now and labelled experimental. | It gives the same rendered screenshots as the CLI plus a browser tab to keep open. Revisit only if instructors require screenshots of the Colab web UI, which would be a new feature (native UI capture). |
 | 2026-11-27 | LMS TLS error: fix upstream by PR, and meanwhile use a LabPilot-side workaround. | `lms.nust.edu.pk` needs legacy TLS renegotiation. A LabPilot LMS client was rejected because it would have to handle NUST credentials. |
+| 2026-11-27 | Goal: a student uses it and the lab gets done, automated end to end, Colab only. The user's CS-412 course has no AI-assistance rule. | User statement. The final acceptance test is the user doing a real lab with the skill from Codex (and Claude Code). |
 | standing | Commit and push to `Ahmad3752/-LabPilotAgentSkill` after each tested step. | User preference. |
 
 ## Waiting on something
