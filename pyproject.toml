@@ -31,6 +31,7 @@ dependencies = [
   "jupyter_client>=8.6,<9",
   "playwright>=1.48,<2",
   "pillow>=10.4,<14",
+  "pypdfium2>=4.30,<6",  # rasterizes the exported PDF into page PNGs for the review step
   "pydantic>=2.7,<3",
   "typer>=0.12,<1",
 ]

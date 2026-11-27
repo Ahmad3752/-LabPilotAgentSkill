@@ -16,6 +16,7 @@ from typing import Any
 import docx
 
 from labpilot.documents.anchors import W_P, element_text
+from labpilot.documents.inspect import SOFT_PROMISES
 from labpilot.evidence.manifest import load_evidence
 from labpilot.models import AnswersFile, ItemStatus, Plan
 from labpilot.workspace import Run, atomic_write_json, read_json
@@ -31,6 +32,17 @@ ERROR_MARKERS = [
     "Exception in thread",
 ]
 MIN_ANSWER_WORDS = 8
+# Writing a student would not hand in. Warnings only: the agent rewrites the text, nothing is blocked.
+WRITING = {
+    "LaTeX markup, which Word shows raw; write the formula in plain words or symbols (Speedup = 1.60 / 0.40 = 4)":
+        re.compile(r"\\(?:frac|text|mathrm|sqrt|times|cdot)\b|\$\$|\\\("),
+    "a number with 5 or more decimal places; round it as a student would (0.182433 s -> 0.18 s)":
+        re.compile(r"(?<![\w.])\d+\.\d{5,}(?![\w.])"),  # not version numbers (3.11.2) or IDs
+    "wording about the tool, not the lab; write as the student":
+        re.compile(r"\bLabPilot\b|\bthe student\b|\bidentity fields?\b|\bGoogle Colab runtime\b|\bauto-?generated\b"
+                   r"|\b(?:this|the) (?:report|document|section|answer|summary) (?:was|is|has been) generated\b", re.I),
+}
+EXACT_ASKED = re.compile(r"decimal|exact|precis", re.I)  # the manual asks for the unrounded value
 
 
 def _finding(check: str, severity: str, message: str, where: str = "") -> dict[str, str]:
@@ -61,6 +73,16 @@ def evaluate(run: Run, docx_path: Path | None = None) -> dict[str, Any]:
             findings.append(_finding("answers_prose", "warn", "answer is very short; add a sentence of explanation", qid))
         if a.verification == "not_verified":
             findings.append(_finding("answers_verified", "fail", "answer is not verified by a real run", qid))
+
+    # 1b. writing style of answers and task summaries (what ends up in the Word copy)
+    texts = [(a.question_id, a.text, questions[a.question_id].text if a.question_id in questions else "")
+             for a in (answers.answers if answers else [])]
+    texts += [(s.task_id, s.explanation, "") for s in (answers.task_summaries if answers else [])]
+    for where, text, asked in texts:
+        for why, pattern in WRITING.items():
+            hit = pattern.search(text)
+            if hit and not (why.startswith("a number") and EXACT_ASKED.search(asked)):
+                findings.append(_finding("writing", "warn", f"'{hit.group(0)}': {why}", where))
 
     # 2. "passed" cells whose output still contains error text
     rec_path = run.exec_dir / "current_records.json"
@@ -105,8 +127,10 @@ def evaluate(run: Run, docx_path: Path | None = None) -> dict[str, Any]:
     covered = " ".join(t.title.lower() for t in plan.tasks)
     for label in doc.get("uncovered_mentions", []):
         if label not in covered and not (label == "cleanup" and "teardown" in covered):
-            findings.append(_finding("sections_covered", "fail",
-                                     f"the manual's introduction mentions '{label}' but no section covers it"))
+            soft = label in SOFT_PROMISES  # the filled manual is the deliverable; never invent a section for it
+            findings.append(_finding("sections_covered", "warn" if soft else "fail",
+                                     f"the manual's introduction mentions '{label}' but no section covers it"
+                                     + ("; add one only if the manual names extra content to hand in" if soft else "")))
 
     # 6. presentation: internal identifiers left in the document text
     if docx_path is not None and docx_path.exists():

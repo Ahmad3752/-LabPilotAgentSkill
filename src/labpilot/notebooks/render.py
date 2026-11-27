@@ -41,6 +41,10 @@ EVIDENCE_CSS = """
   .jp-OutputArea-output pre, .jp-RenderedText pre { white-space: pre-wrap !important; overflow-wrap: anywhere; }
   /* the same for very long code lines, which otherwise widen the whole cell image */
   .jp-InputArea-editor pre, .jp-InputArea-editor .highlight pre { white-space: pre-wrap !important; overflow-wrap: anywhere; }
+  /* wrap at ~118 characters, not at the 1280px viewport: a full-width crop is ~13in at capture DPI and Word fits it
+     at ~0.49 scale; 880px keeps the crop under ~1000px, i.e. >= MIN_READABLE_SCALE (0.6) on an A4 or Letter page */
+  .jp-OutputArea-output pre, .jp-RenderedText pre, .jp-InputArea-editor pre { max-width: 880px; }
+  .jp-OutputArea-output pre { word-break: normal !important; }  /* JupyterLab's break-all splits words mid-word */
   .labpilot-provenance { font: 11px sans-serif; color: #555; padding: 4px 16px; border-bottom: 1px solid #ddd; }
 </style>
 """

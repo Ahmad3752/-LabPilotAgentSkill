@@ -92,3 +92,25 @@ def test_sample_lab_is_colab_ok(python_lab: Path) -> None:
     manual = next(python_lab.glob("*.docx"))
     text = "\n".join(b.text for b in inspect_docx(manual, sha256_file(manual)).blocks)
     assert colab_fit(text)["colab_ok"] is True
+
+
+def test_word_equations_are_read_as_plain_text_and_anchors_stay_stable(tmp_path: Path) -> None:
+    from lxml import etree
+
+    m = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+    d = docx.Document()
+    p = d.add_paragraph("Compute the speedup ")
+    omath = etree.SubElement(p._p, f"{{{m}}}oMath")
+    for chunk in ("S", "=", "T1/T4"):
+        etree.SubElement(etree.SubElement(omath, f"{{{m}}}r"), f"{{{m}}}t").text = chunk
+    d.add_paragraph("Plain paragraph")
+    path = tmp_path / "math.docx"
+    d.save(str(path))
+    insp = inspect_docx(path, sha256_file(path))
+    eq = next(b for b in insp.blocks if b.text.startswith("Compute"))
+    assert eq.text == "Compute the speedup S=T1/T4"  # the formula is visible to the agent, no LaTeX
+    assert eq.fp == fingerprint("Compute the speedup")  # same anchor as before equations were read
+    plain = next(b for b in insp.blocks if b.text == "Plain paragraph")
+    assert plain.fp == fingerprint("Plain paragraph")
+    body = docx.Document(str(path)).element.body
+    assert element_text(resolve(body, f"{eq.anchor}#{eq.fp}")) == eq.text

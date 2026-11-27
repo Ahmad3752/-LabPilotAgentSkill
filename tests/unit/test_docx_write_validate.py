@@ -50,9 +50,9 @@ def test_write_into_solution_boxes_and_validate(python_lab: Path, tmp_path: Path
     src, plan, contents = _setup(python_lab, tmp_path)
     before = sha256_file(src)
     out = tmp_path / "out.docx"
-    rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run on Google Colab")
+    rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents)
     assert sha256_file(src) == before  # original untouched
-    assert {p["mode"] for p in rep.placements} == {"anchor", "append"}  # SETUP has no box -> appendix
+    assert {p["mode"] for p in rep.placements} == {"anchor", "after_source"}  # SETUP follows the manual's Setup section
     assert len(rep.inserted_images) == len(contents)
     assert len(rep.removed_placeholders) == 2
     assert len(rep.layout_changes) == 4  # exact height + cantSplit on both boxes
@@ -66,7 +66,8 @@ def test_write_into_solution_boxes_and_validate(python_lab: Path, tmp_path: Path
     text = box1.text
     assert "Task 1, Part A: Load Both Files" in text and "Task 1, Part B: Compute Revenue" in text
     assert text.index("Part A: Load") < text.index("Part B: Compute")
-    assert "Figure 1: Code and output (run on Google Colab)" in text
+    assert "Figure 1: Code and output\n" in text and "Colab" not in text  # where it ran lives in REVIEW.md
+    assert "explains T1" in text and "What the code does" not in text  # plain paragraph, no label
     assert "Paste your code" not in text
     assert len(box1._tc.findall(".//" + qn("a:blip"))) == 2  # inline images inside the cell
     trpr = tables[0].rows[1]._tr.trPr
@@ -79,7 +80,7 @@ def test_regeneration_does_not_duplicate(python_lab: Path, tmp_path: Path) -> No
     src, plan, contents = _setup(python_lab, tmp_path)
     out = tmp_path / "out.docx"
     for _ in range(2):
-        rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run on Google Colab")
+        rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents)
     with zipfile.ZipFile(out) as zf:
         media = [n for n in zf.namelist() if n.startswith("word/media/")]
     assert len(media) == len(contents) + 1  # +1 original logo; second write started from the pristine source
@@ -91,7 +92,7 @@ def test_incomplete_tasks_are_labelled_not_verified(python_lab: Path, tmp_path: 
     contents[1] = TaskContent(task=contents[1].task, explanation=None, evidence=[],
                               answers=[(q.text, None) for q in contents[1].task.observation_questions], status="blocked")
     out = tmp_path / "out.docx"
-    write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run on Google Colab")
+    write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents)
     text = "\n".join(p.text for p in docx.Document(str(out)).tables[0].rows[1].cells[0].paragraphs)
     assert "BLOCKED" in text and UNVERIFIED in text
 
@@ -99,7 +100,7 @@ def test_incomplete_tasks_are_labelled_not_verified(python_lab: Path, tmp_path: 
 def test_validation_detects_lost_original_text_and_missing_images(python_lab: Path, tmp_path: Path) -> None:
     src, plan, contents = _setup(python_lab, tmp_path)
     out = tmp_path / "out.docx"
-    rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run on Google Colab")
+    rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents)
     d = docx.Document(str(out))
     victim = next(p for p in d.paragraphs if p.text.startswith("Read both CSV files"))
     victim._p.getparent().remove(victim._p)
@@ -116,8 +117,7 @@ def test_unresolvable_anchor_goes_to_flagged_appendix(python_lab: Path, tmp_path
     src, plan, contents = _setup(python_lab, tmp_path)
     t = contents[1].task.model_copy(update={"solution_anchor": "b21/r1/c0#ffffffffffff"})
     contents[1] = TaskContent(task=t, explanation=None, evidence=contents[1].evidence, answers=[], status="passed")
-    rep = write_document(source=src, out_path=tmp_path / "o.docx", run_dir=tmp_path, plan=plan, contents=contents,
-                         run_label="run on Google Colab")
+    rep = write_document(source=src, out_path=tmp_path / "o.docx", run_dir=tmp_path, plan=plan, contents=contents)
     assert rep.review_required and "T1.A" in rep.review_required[0]
     assert {"task_id": "T1.A", "anchor": None, "mode": "append"} in rep.placements
 
@@ -126,7 +126,7 @@ def test_student_fields_only_when_supplied(python_lab: Path, tmp_path: Path) -> 
     src, plan, contents = _setup(python_lab, tmp_path)
     insp = inspect_docx(src, sha256_file(src))
     out = tmp_path / "s.docx"
-    write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run on Google Colab",
+    write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents,
                    student={"name": "Test Student"}, student_fields=insp.student_fields)
     texts = [p.text for p in docx.Document(str(out)).paragraphs]
     assert any(t.startswith("Name:") and "Test Student" in t for t in texts)
@@ -144,7 +144,7 @@ def test_multi_part_evidence_is_inserted_in_order_with_captions(python_lab: Path
     out_rec = _png(tmp_path / "output.png", 900, 300).model_copy(update={"task_id": t.id, "kind": "output"})
     contents[1] = TaskContent(task=t, explanation=None, evidence=[*parts, out_rec], answers=[], status="passed")
     out = tmp_path / "parts.docx"
-    rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents, run_label="run X")
+    rep = write_document(source=src, out_path=out, run_dir=tmp_path, plan=plan, contents=contents)
     assert rep.review_required == []  # each part fits a page at a readable scale
 
     d = docx.Document(str(out))
@@ -160,9 +160,9 @@ def test_multi_part_evidence_is_inserted_in_order_with_captions(python_lab: Path
     i = seq.index(parts[0].sha256)
     n = int(seq[i + 1].split(":")[0].split()[1])
     assert seq[i : i + 6] == [
-        parts[0].sha256, f"Figure {n}: Code (part 1 of 2; run X)",
-        parts[1].sha256, f"Figure {n + 1}: Code (continued, part 2 of 2; run X)",
-        out_rec.sha256, f"Figure {n + 2}: Output (run X)",
+        parts[0].sha256, f"Figure {n}: Code (part 1 of 2)",
+        parts[1].sha256, f"Figure {n + 1}: Code (continued, part 2 of 2)",
+        out_rec.sha256, f"Figure {n + 2}: Output",
     ]
 
 
@@ -171,6 +171,5 @@ def test_image_too_tall_to_read_is_flagged_not_silently_shrunk(python_lab: Path,
     t = contents[1].task
     tall = _png(tmp_path / "tall.png", 1500, 4000).model_copy(update={"task_id": t.id})  # one old unsplit capture
     contents[1] = TaskContent(task=t, explanation=None, evidence=[tall], answers=[], status="passed")
-    rep = write_document(source=src, out_path=tmp_path / "t.docx", run_dir=tmp_path, plan=plan, contents=contents,
-                         run_label="run X")
+    rep = write_document(source=src, out_path=tmp_path / "t.docx", run_dir=tmp_path, plan=plan, contents=contents)
     assert any("tall.png" in x and "labpilot capture" in x for x in rep.review_required)
