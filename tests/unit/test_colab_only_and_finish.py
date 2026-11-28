@@ -185,6 +185,11 @@ def test_finish_stops_on_error_output(tmp_path: Path, colab_only: None, monkeypa
     again = finish(run)
     assert next(s for s in again["steps"] if s["step"] == "execute")["status"] == "failed"
     assert "preflight" not in {s["step"] for s in again["steps"]}
+    # the same --gpu on every call does not re-send them either; a GPU change does
+    assert "preflight" not in {s["step"] for s in finish(run, gpu="none")["steps"]}
+    assert "preflight" in {s["step"] for s in finish(run, gpu="t4")["steps"]}
+    assert run.manifest.backend_state["gpu"] == "T4"
+    assert "preflight" not in {s["step"] for s in finish(run, gpu="T4")["steps"]}
 
 
 def test_stop_keeps_ownership_until_release_is_confirmed(tmp_path: Path, colab_only: None,

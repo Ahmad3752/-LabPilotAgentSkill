@@ -22,6 +22,7 @@ from labpilot.orchestration import (
     capture,
     check_inputs,
     execute,
+    gpu_choice,
     load_plan,
     preflight,
     reset_for_changed_inputs,
@@ -487,11 +488,12 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
         transient = {r["cell_id"] for r in (read_json(rp) if rp.exists() else []) if r.get("error_code") in TRANSIENT}
         failed = [c for c, s in m.cell_status.items() if s == ItemStatus.FAILED]
         todo = [c for c, s in m.cell_status.items() if s in (ItemStatus.PENDING, ItemStatus.STALE)]
+        new_gpu = bool(gpu) and gpu_choice(gpu or "") != m.backend_state.get("gpu")  # a GPU change re-runs failures
         if m.backend_state.get("pending_host_actions"):
             stop = {"actor": "agent", "action": "record-execution",
                     "detail": f"Run the cells in host_actions.json via colab-mcp, then `labpilot record-execution {rid} "
                               "--file result.json`, then `labpilot finish` again."}
-        elif [c for c in failed if c not in transient] and not todo and not gpu:  # a new --gpu re-runs them
+        elif [c for c in failed if c not in transient] and not todo and not new_gpu:
             say(3, "the failing cells are unchanged, so nothing is run (skipped)")
             steps.append({"step": step, "status": "failed", "failed_cells": failed})
             stop = {"actor": "agent", "action": "repair",
