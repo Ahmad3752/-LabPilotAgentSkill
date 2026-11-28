@@ -673,6 +673,8 @@ COLAB_ATTENTION = [
     (re.compile(r"drive\.mount\s*\("),
      "drive.mount() needs an interactive Google sign-in the CLI cannot click: upload the files to the runtime "
      "directly instead of reading them from Drive."),
+    (re.compile(r"\b(?:GPU|CUDA)\b|\.cuda\(|['\"]cuda['\"]|change runtime type", re.IGNORECASE),
+     "The lab uses a GPU: ask the user once (it uses their Colab GPU quota), then add --gpu T4 to `labpilot finish`."),
 ]
 
 

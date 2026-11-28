@@ -88,9 +88,12 @@ def test_start_requires_consent_and_records_owned_session(tmp_path: Path, monkey
     assert handle.identity["google_colab"] is True
     session = handle.state["session"]
     assert session.startswith("labpilot-") and session in run.manifest.backend_state["owned_sessions"]
-    assert fake.calls[0][:3] == ["colab", "new", "-s"] and "--gpu" not in fake.calls[0]  # CPU runtime only
+    assert fake.calls[0][:3] == ["colab", "new", "-s"] and "--gpu" not in fake.calls[0]  # CPU by default
     be.stop(handle, ctx)
     assert ["colab", "stop", "-s", session] in fake.calls
+    run.manifest.backend_state["gpu"] = "T4"  # what `--gpu t4` stores
+    be.start(ctx)
+    assert [c[-2:] for c in fake.calls if c[1] == "new"][-1] == ["--gpu", "T4"]
 
 
 def test_exec_success_failure_and_stop_on_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

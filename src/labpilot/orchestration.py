@@ -435,11 +435,14 @@ def _choose(run: Run, backend: str) -> tuple[str, list[str]]:
     return backend, notes
 
 
-def preflight(run: Run, backend: str = "auto", allow_cloud: bool = False, allow_upload: bool = False) -> dict[str, Any]:
+def preflight(run: Run, backend: str = "auto", allow_cloud: bool = False, allow_upload: bool = False,
+              gpu: str | None = None) -> dict[str, Any]:
     plan = load_plan(run)
     m = run.manifest
     profile = load_profile(plan.profile)
     m.profile = plan.profile
+    if gpu:  # remembered for the run; "none" goes back to a CPU runtime
+        m.backend_state["gpu"] = None if gpu.lower() in ("none", "cpu") else gpu.upper()
     if allow_cloud or allow_upload:
         m.consent.cloud_compute = m.consent.cloud_compute or allow_cloud
         m.consent.upload_datasets = m.consent.upload_datasets or allow_upload

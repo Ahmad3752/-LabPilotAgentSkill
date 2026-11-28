@@ -42,6 +42,8 @@ The user often starts a lab and walks away, so every question goes in ONE messag
    - the question: "Reply **yes** with your name and CMS ID, and I'll run it on your Google Colab (uploading the lab
      files) and fill the Word copy." When doctor's `student` is set, ask only for yes and show the saved values:
      "I'll put <name>, <id> on the report."
+   - when colab-check's `needs_attention` says the lab uses a GPU, add "on a free T4 GPU (uses your Colab GPU
+     quota)" to the question. Their yes then also means `--gpu T4`.
 4. **End your turn with that message.** Run no further commands until the user answers; an agent that keeps
    working gets the answer too late. Skip the question only when the user's own request already says yes to
    Colab and the name/ID are given or saved.
@@ -90,7 +92,8 @@ never handle the LMS password.
    no interactive input, no `files.upload()`, explicit `print`/`show`/`display` for every required output,
    assertions for numeric checks, rounded printed values (*How to write*).
 7. Run the whole mechanical chain with one command:
-   `labpilot finish <id> --cells cells.json --allow-cloud --allow-upload --json`.
+   `labpilot finish <id> --cells cells.json --allow-cloud --allow-upload --json`
+   (add `--gpu T4` for a GPU lab; `--gpu L4`/`A100` only if the user asks, since they need Colab Pro).
    It builds the notebook, runs it on Colab, captures the screenshots and stops when it needs you. Read only its
    JSON summary: `verdict`, `steps[].status` and `next_action`. Post "Running on Colab (40%)" as you start it.
    - `next_action.action == "repair"`: read `failed[].traceback_tail` in the execute step, fix only those cells

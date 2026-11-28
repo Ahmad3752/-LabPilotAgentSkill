@@ -197,7 +197,8 @@ class ColabCliBackend:
         if not m.consent.cloud_compute:
             raise LabPilotError(ErrorCode.CONSENT_REQUIRED, "Colab compute needs explicit user consent.", exit_code=ExitCode.CONFIG)
         session = f"{SESSION_PREFIX}{ctx.run.id}-{uuid.uuid4().hex[:4]}".lower()
-        res = self._colab("new", "-s", session, timeout=900)
+        gpu = m.backend_state.get("gpu")  # set by `--gpu`; the colab CLI validates the variant and tier
+        res = self._colab("new", "-s", session, *(["--gpu", gpu] if gpu else []), timeout=900)
         if not res.ok:
             code = self._classify_transport(res)
             raise LabPilotError(code, f"colab new failed: {strip_ansi(res.stderr or res.stdout)[-400:]}",

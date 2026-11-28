@@ -3,7 +3,7 @@
 Where the work stands, what was decided and why, what is waiting, and what comes next.
 What is verified lives in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md); history lives in `git log`. This file holds only what neither records.
 
-Last updated: 2026-11-27.
+Last updated: 2026-11-28.
 
 ## Decisions (settled with the user; reopen only if the user does)
 
@@ -45,6 +45,8 @@ Last updated: 2026-11-27.
 - `docs/INTERVIEW_PREP.md` is the user's personal interview prep. It is deliberately left uncommitted.
 
 ## Session log (newest first; keep the last five)
+
+- **2026-11-28:** GPU labs: `labpilot finish --gpu T4` (also `preflight`/`resume`) runs the lab on a Colab GPU runtime; `colab-check` flags GPU labs and the skill asks once. Unit-tested only; next: one real T4 run (e.g. Lab 10, In-Context Learning).
 
 - **2026-11-28:** `finish` returns a `closing_message` ("All done, your lab is complete! Hope you liked it. With love from VellaGang <3") only when the lab is COMPLETED; the skill ends its final message with it.
 

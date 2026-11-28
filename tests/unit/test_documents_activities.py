@@ -127,3 +127,5 @@ def test_colab_fit_sql_server_and_interactive_calls() -> None:
     fit = colab_fit("Google Colab\nfrom google.colab import files, drive\nuploaded = files.upload()\ndrive.mount('/content/d')")
     assert fit["colab_ok"] is True and len(fit["needs_attention"]) == 2
     assert all("upload" in n and "directly" in n for n in fit["needs_attention"])
+    fit = colab_fit("Google Colab\nRuntime > Change runtime type > T4 GPU\nmodel.to('cuda')")
+    assert fit["colab_ok"] and len(fit["needs_attention"]) == 1 and "--gpu T4" in fit["needs_attention"][0]

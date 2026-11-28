@@ -4,7 +4,7 @@ LabPilot runs lab code **only on Google Colab**, with the user's own account. Th
 
 | Backend | How | When | Notes |
 |---|---|---|---|
-| colab-cli (default) | `labpilot finish <id> --cells cells.json --allow-cloud --allow-upload` | Always, unless the user set up colab-mcp. `--backend auto` means colab-cli. | Runs every cell in a real Colab CPU runtime. Never allocate compute or upload files without the user's consent. Never request a GPU unless the lab needs one and the user agrees. LabPilot stops only the Colab sessions it created. |
+| colab-cli (default) | `labpilot finish <id> --cells cells.json --allow-cloud --allow-upload` | Always, unless the user set up colab-mcp. `--backend auto` means colab-cli. | Runs every cell in a real Colab runtime: CPU by default, a GPU with `--gpu T4` (or L4, A100, ... on Colab Pro; `--gpu none` goes back to CPU). The choice is remembered for the run and applies to the next Colab session. Never allocate compute or upload files without the user's consent. Never request a GPU unless the lab needs one and the user agrees. LabPilot stops only the Colab sessions it created. |
 | colab-mcp (experimental) | `labpilot finish <id> --backend colab-mcp ...` | Claude Code with the official colab-mcp server and a Colab tab connected. | Host-mediated: `finish` stops with `record-execution`; you run the cells through the colab-mcp tools, then `labpilot record-execution`, then `finish` again. Codex is not a documented colab-mcp client. |
 
 The local Jupyter kernel exists only for LabPilot's own tests and offline demo. `--backend local` is refused.

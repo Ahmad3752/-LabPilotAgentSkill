@@ -400,7 +400,7 @@ def _recover(run: Run) -> list[dict[str, Any]]:
 
 
 def resume(run: Run, backend: str | None = None, allow_cloud: bool = False, allow_upload: bool = False,
-           max_steps: int = 8) -> dict[str, Any]:
+           max_steps: int = 8, gpu: str | None = None) -> dict[str, Any]:
     """Advance deterministic steps from the last consistent checkpoint until agent/user input is needed."""
     steps = _recover(run)
     m = run.manifest
@@ -410,7 +410,7 @@ def resume(run: Run, backend: str | None = None, allow_cloud: bool = False, allo
             break
         if na["action"] == "preflight" or (na["action"] == "execute" and (backend or not m.backend
                                                                            or any(d.status in ('found', 'mapped') and not d.staged_path for d in m.datasets))):
-            res = preflight(run, backend or m.backend or "auto", allow_cloud, allow_upload)
+            res = preflight(run, backend or m.backend or "auto", allow_cloud, allow_upload, gpu)
             steps.append({"step": "preflight", "ok": res["ok"], "backend": res["backend"]})
             if not res["ok"]:
                 break
@@ -448,7 +448,7 @@ CLOSING_MESSAGE = "All done, your lab is complete! Hope you liked it. With love 
 
 
 def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None = None, backend: str | None = None,
-           allow_cloud: bool = False, allow_upload: bool = False) -> dict[str, Any]:
+           allow_cloud: bool = False, allow_upload: bool = False, gpu: str | None = None) -> dict[str, Any]:
     """build-notebook -> preflight/execute -> capture -> answers -> export (runs evaluate); skips current steps.
 
     Stops at the first step that needs the agent (failed cells, answers) or the user (sign-in, consent).
@@ -491,7 +491,7 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
             stop = {"actor": "agent", "action": "record-execution",
                     "detail": f"Run the cells in host_actions.json via colab-mcp, then `labpilot record-execution {rid} "
                               "--file result.json`, then `labpilot finish` again."}
-        elif [c for c in failed if c not in transient] and not todo:
+        elif [c for c in failed if c not in transient] and not todo and not gpu:  # a new --gpu re-runs them
             say(3, "the failing cells are unchanged, so nothing is run (skipped)")
             steps.append({"step": step, "status": "failed", "failed_cells": failed})
             stop = {"actor": "agent", "action": "repair",
@@ -500,7 +500,7 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
         elif todo or failed:
             say(3, "running the cells on " + ("the local kernel" if (backend or m.backend) == "local" else "Colab"))
             step = "preflight"
-            pf = preflight(run, backend or m.backend or "auto", allow_cloud, allow_upload)
+            pf = preflight(run, backend or m.backend or "auto", allow_cloud, allow_upload, gpu)
             bad = [c for c in pf["preflight"]["checks"] if not c["ok"] and c.get("required", True)]
             steps.append({"step": step, "status": "done" if pf["ok"] else "failed", "backend": pf["backend"],
                           "failed_checks": [c["name"] for c in bad], "input_changes": pf["input_changes"]})
