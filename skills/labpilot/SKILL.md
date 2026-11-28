@@ -2,13 +2,19 @@
 name: labpilot
 description: Work through a Google Colab programming lab manual (.docx) and its datasets end to end. Plans the tasks, writes and runs the notebook code in Google Colab (Colab only), captures real screenshots, and fills a COPY of the original Word file with evidence and grounded answers. Can also check the university LMS (Moodle, via the Nuts LMS MCP) for new labs and download them. Use when the user asks to do, run, complete or prepare a lab, lab manual, assignment notebook or lab report from a Word document, or asks whether there is a new lab on the LMS.
 license: MIT
-compatibility: Needs the `labpilot` CLI (Python 3.11+, headless Chromium). Google Colab via the official google-colab-cli or colab-mcp. LMS checks need the Nuts LMS MCP (moodle-mcp).
+compatibility: Needs the `labpilot` CLI (Python 3.11+, headless Chromium). Google Colab via the official google-colab-cli or colab-mcp, or in chat apps (Claude.ai, ChatGPT) the student's own browser Colab. LMS checks need the Nuts LMS MCP (moodle-mcp).
 ---
 
 # LabPilot
 
 You are the reasoning layer. The `labpilot` CLI is the deterministic execution, evidence and document layer.
 Never fake anything: no invented outputs, numbers, screenshots, files or execution records.
+
+## Chat app mode (Claude.ai, ChatGPT)
+If you run in a chat app's code sandbox (Linux, uploads under `/mnt/user-data/uploads` or `/mnt/data`, no
+`labpilot` installed yet), follow [chat-apps.md](references/chat-apps.md) instead of the setup and Colab steps
+below. The student runs your notebook in their own browser Colab with one click; you do the rest. No LMS there,
+and never ask for any password.
 
 ## Running `labpilot`
 - **In Codex, always run labpilot commands with `sandbox_permissions: "require_escalated"`.** LabPilot's rule
@@ -146,3 +152,4 @@ file and read only the part you need. If anything is interrupted, run `labpilot 
 - [evidence-and-docx.md](references/evidence-and-docx.md): screenshots, provenance, Word placement.
 - [troubleshooting.md](references/troubleshooting.md): error codes and fixes.
 - [lms.md](references/lms.md): checking the LMS for new labs with the Nuts LMS MCP.
+- [chat-apps.md](references/chat-apps.md): Claude.ai / ChatGPT: the student runs the notebook in their own Colab.

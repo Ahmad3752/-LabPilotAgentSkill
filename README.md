@@ -34,7 +34,23 @@ output/<lab-name>-<run-id>/
 
 `Completed` is used only when every task ran, every screenshot is valid, every answer is backed by a cell that passed and the Word copy validates. Otherwise you get `Partial` with a list of what is missing, and `labpilot resume <run-id>` continues the run later.
 
-## Quick start (Windows 11)
+## Quick start in a chat app (Claude.ai or ChatGPT, nothing to install)
+
+1. Download the lab manual (`.docx`) and its data files from the LMS yourself.
+2. Open Claude.ai (code execution on, with network access for github.com and pypi.org) and upload the skill once:
+   zip the `skills/labpilot` folder and add it under Settings > Capabilities > Skills. Then, in a new chat,
+   upload the lab files and say: *"Use LabPilot to do this lab."*
+3. Reply **yes** with your name and CMS ID when it asks.
+4. It gives you a notebook. Open [colab.research.google.com](https://colab.research.google.com), **File > Upload
+   notebook**, **Runtime > Run all**, choose your lab files when asked, then **File > Download > Download .ipynb**
+   and upload that file back to the chat.
+5. It writes the answers and gives you the completed Word file.
+
+Your code runs in your own Google Colab, in your browser. The chat never asks for your LMS or Google password.
+LMS discovery is not available in this mode. ChatGPT is not tested yet (its sandbox usually cannot download
+LabPilot).
+
+## Quick start (Windows 11, Codex or Claude Code)
 
 You need:
 - **Python 3.12+ from python.org** (tick "Add python.exe to PATH"). It must be a signed build, because Windows Smart App Control blocks unsigned ones.
@@ -98,6 +114,7 @@ This runs a synthetic sample lab through the real CLI with known agent files.
 | Checking the university LMS for new labs (Nuts LMS MCP, read-only) | Verified with a real account (finding labs); downloads not yet verified |
 | One-command Windows installer (`scripts/install.ps1`): install, sign-ins, LMS connection, start the agent | Install part verified on a clean PC; the sign-in, LMS and start steps not yet |
 | Google Colab through the browser (`colab-mcp`) | Experimental, not yet verified |
+| Chat apps (Claude.ai): the student runs LabPilot's notebook in their own browser Colab (`--backend colab-web`) | Unit-tested; not yet tried in a real Claude.ai chat |
 | One question up front (yes + name/CMS ID), then no more questions; name/ID saved on your PC | Skill rule; saving unit-tested; not yet tried in a real run |
 | A full lab from one prompt in Codex | Next test |
 | macOS, Linux | Implemented, not yet verified |

@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from labpilot.adapters.base import CellRequest, RunContext
 from labpilot.adapters.colab_cli import ColabCliBackend
 from labpilot.adapters.colab_mcp_bridge import ColabMcpBridge
+from labpilot.adapters.colab_web import ColabWebBackend
 from labpilot.adapters.local import LocalBackend
 from labpilot.config import RuntimeProfile, load_config, load_profile
 from labpilot.datasets.validate import dataset_blockers, resolve_datasets, stage_local
@@ -408,6 +409,8 @@ def make_backend(name: str) -> Any:
         return ColabCliBackend()
     if name == "colab-mcp":
         return ColabMcpBridge()
+    if name == "colab-web":
+        return ColabWebBackend()
     raise LabPilotError(ErrorCode.BACKEND_UNAVAILABLE, f"Unknown backend '{name}'.", exit_code=ExitCode.CONFIG)
 
 
@@ -598,7 +601,7 @@ def execute(run: Run, cell: str | None = None, timeout: int | None = None, retry
     if backend_override:
         m.backend = _choose(run, backend_override)[0]
     _check_backend_allowed(m.backend or "")
-    if m.backend in ("colab-cli", "colab-mcp"):
+    if m.backend in ("colab-cli", "colab-mcp", "colab-web"):
         needs_upload = any(d.status in ("found", "mapped") for d in m.datasets)
         if not m.consent.cloud_compute or (needs_upload and not m.consent.upload_datasets):
             raise LabPilotError(ErrorCode.CONSENT_REQUIRED,
@@ -645,6 +648,14 @@ def execute(run: Run, cell: str | None = None, timeout: int | None = None, retry
         return {"status": "WAITING_FOR_HOST", "host_actions": str(run.path("host_actions.json")),
                 "cells": len(actions["cells"]),
                 "next_action": "Host agent: follow host_actions.json, then `labpilot record-execution <run-id> --file result.json`."}
+
+    if m.backend == "colab-web":
+        handoff = be.write_handoff(run, targets)
+        m.backend_state.update(pending_colab_web=True, pending_attempt=attempt_id,
+                               pending_targets=[c.cell_id for c in targets], pending_skipped=skipped)
+        run.save()
+        run.set_state(RunState.EXECUTING, "waiting for the student to run the notebook in Colab")
+        return {"status": "WAITING_FOR_USER", "handoff": str(handoff), "cells": len(targets)}
 
     run.path("cancel.requested").unlink(missing_ok=True)  # a new explicit execute supersedes an old cancel
     ctx = RunContext(run=run, profile=profile, attempt_id=attempt_id, timeout_s=timeout or profile.cell_timeout_s,
@@ -745,6 +756,27 @@ def record_execution(run: Run, result_file: Path) -> dict[str, Any]:
     summary = apply_records(run, plan, attempt_id, records, None, "colab-mcp (host-reported)", pending,
                             m.backend_state.get("pending_skipped", []))
     summary["status"] = "FAILED_CELLS" if summary["failed"] else ("PARTIAL" if summary["blocked"] else "OK")
+    return summary
+
+
+def record_colab_web(run: Run, executed: Path) -> dict[str, Any]:
+    """Read the notebook the student ran in Colab and downloaded (see adapters/colab_web.py)."""
+    plan = load_plan(run)
+    m = run.manifest
+    if not m.backend_state.get("pending_colab_web"):
+        raise LabPilotError(ErrorCode.INVALID_STATE, "No notebook is waiting for a Colab run.",
+                            next_action=f"labpilot finish {run.id} --backend colab-web --allow-cloud --allow-upload")
+    pending = m.backend_state.get("pending_targets", [])
+    current = {c.id: c for c in _code_cells(run)}
+    expected = [CellRequest(cid, current[cid].metadata.get("labpilot", {}).get("task_id", ""), current[cid].source,
+                            sha256_text(current[cid].source)) for cid in pending if cid in current]
+    attempt_id = m.backend_state.get("pending_attempt") or f"a{len(m.attempts) + 1:03d}"
+    records = ColabWebBackend().ingest(run, executed, expected, attempt_id)
+    m.backend_state["pending_colab_web"] = False
+    summary = apply_records(run, plan, attempt_id, records, None, ColabWebBackend.label, pending,
+                            m.backend_state.get("pending_skipped", []))
+    summary["status"] = "FAILED_CELLS" if summary["failed"] else ("PARTIAL" if summary["blocked"] else "OK")
+    summary["not_run"] = [r.cell_id for r in records if r.error_code in ("NOT_RUN", "NOT_REPORTED")]
     return summary
 
 

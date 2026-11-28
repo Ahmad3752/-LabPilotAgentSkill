@@ -25,6 +25,7 @@ from labpilot.orchestration import (
     execute,
     load_plan,
     preflight,
+    record_colab_web,
     reset_for_changed_inputs,
     save_answers,
     set_gpu,
@@ -322,6 +323,8 @@ def next_action(run: Run) -> dict[str, str]:
             return {"actor": "labpilot", "action": "preflight", "detail": "labpilot preflight <run-id>"}
     if m.backend_state.get("pending_host_actions"):
         return {"actor": "agent", "action": "record-execution", "detail": "Follow host_actions.json via colab-mcp."}
+    if m.backend_state.get("pending_colab_web"):
+        return {"actor": "user", "action": "run-in-colab", "detail": _colab_web_detail(run)}
     exhausted = [c for c, n in m.cell_repairs.items()
                  if n > m.retry_budget_per_cell and m.cell_status.get(c) != ItemStatus.PASSED]
     if exhausted:
@@ -460,9 +463,15 @@ def _gpu_shaped(failed: list[dict[str, Any]]) -> bool:
 CLOSING_MESSAGE = "All done, your lab is complete! Hope you liked it. With love from VellaGang <3"
 
 
+def _colab_web_detail(run: Run) -> str:
+    return (f"Give the student {run.path('for_colab.ipynb')}: open it in Google Colab, Runtime > Run all, upload the "
+            "lab files when asked, then File > Download > Download .ipynb and give that file back. Then "
+            f"`labpilot finish {run.id} --executed <downloaded file>`.")
+
+
 def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None = None, backend: str | None = None,
            allow_cloud: bool = False, allow_upload: bool = False, gpu: str | None = None,
-           allow_gpu: bool = False) -> dict[str, Any]:
+           allow_gpu: bool = False, executed_file: Path | None = None) -> dict[str, Any]:
     """build-notebook -> preflight/execute -> capture -> answers -> export (runs evaluate); skips current steps.
 
     Stops at the first step that needs the agent (failed cells, answers) or the user (sign-in, consent).
@@ -502,7 +511,32 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
         transient = {r["cell_id"] for r in (read_json(rp) if rp.exists() else []) if r.get("error_code") in TRANSIENT}
         failed = [c for c, s in m.cell_status.items() if s == ItemStatus.FAILED]
         todo = [c for c, s in m.cell_status.items() if s in (ItemStatus.PENDING, ItemStatus.STALE)]
-        if m.backend_state.get("pending_host_actions"):
+        recorded = False
+        if executed_file:  # colab-web: the notebook the student ran in their own Colab
+            step = "record-colab-run"
+            say(3, "reading the notebook you ran in Colab")
+            ex = record_colab_web(run, executed_file)
+            ran = True
+            steps.append({"step": step, "status": "failed" if ex["failed"] else "done", "result": ex["status"],
+                          "passed": len(ex["passed"]), "failed": ex["failed"], "not_run": ex["not_run"]})
+            if ex["failed"]:
+                stop = {"actor": "agent", "action": "repair",
+                        "detail": "Fix the failing cells using `failed[].traceback_tail`, then "
+                                  f"`labpilot finish {rid} --cells cells.json` for a new notebook to run in Colab."}
+            elif ex["not_run"]:  # stopped early or cells edited: hand out a fresh notebook below
+                for cid in ex["not_run"]:
+                    m.cell_status[cid] = ItemStatus.PENDING
+                run.save()
+            recorded = True
+            todo = [c for c, s in m.cell_status.items() if s in (ItemStatus.PENDING, ItemStatus.STALE)]
+            failed = [c for c, s in m.cell_status.items() if s == ItemStatus.FAILED]
+            step = "execute"
+        if stop is not None or (recorded and not todo):
+            pass
+        elif m.backend_state.get("pending_colab_web") and not ran:
+            steps.append({"step": step, "status": "waiting", "reason": "waiting for the student's Colab run"})
+            stop = {"actor": "user", "action": "run-in-colab", "detail": _colab_web_detail(run)}
+        elif m.backend_state.get("pending_host_actions"):
             stop = {"actor": "agent", "action": "record-execution",
                     "detail": f"Run the cells in host_actions.json via colab-mcp, then `labpilot record-execution {rid} "
                               "--file result.json`, then `labpilot finish` again."}
@@ -545,6 +579,8 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
                               "blocked": ex.get("blocked", []), "runtime_release": ex.get("runtime_release")})
                 if ex["status"] == "WAITING_FOR_HOST":
                     stop = {"actor": "agent", "action": "record-execution", "detail": ex["next_action"]}
+                elif ex["status"] == "WAITING_FOR_USER":
+                    stop = {"actor": "user", "action": "run-in-colab", "detail": _colab_web_detail(run)}
                 elif (ex["status"] == "FAILED_CELLS" and m.backend_state.get("gpu")
                       and "no GPU" in m.backend_state.get("runtime", "") and _gpu_shaped(ex["failed"])):
                     stop = {"actor": "user", "action": "gpu-unavailable",

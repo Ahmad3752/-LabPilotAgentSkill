@@ -509,7 +509,10 @@ def resume(run_id: str, backend: str = typer.Option(None), allow_cloud: bool = F
 def finish(run_id: str,
            cells: Path = typer.Option(None, "--cells", help="cells.json to build (omit if the notebook is current)."),  # noqa: B008
            answers: Path = typer.Option(None, "--answers", help="answers.json written from the real outputs."),  # noqa: B008
-           backend: str = typer.Option(None, help="colab-cli (default) or colab-mcp."),
+           backend: str = typer.Option(None, help="colab-cli (default), colab-mcp, or colab-web (the student runs "
+                                                   "the notebook in their own browser; for Claude.ai/ChatGPT)."),
+           executed: Path = typer.Option(None, "--executed", help="colab-web: the .ipynb the student downloaded from "  # noqa: B008
+                                                                   "Colab after Run all."),
            allow_cloud: bool = typer.Option(False, help="User consents to allocating Google Colab compute."),
            allow_upload: bool = typer.Option(False, help="User consents to uploading the lab files to Colab."),
            gpu: str = typer.Option(None, help="Colab GPU for labs that need one (T4, L4, A100, ...; none = CPU)."),
@@ -518,7 +521,7 @@ def finish(run_id: str,
     """After plan/cells/answers: build, run on Colab, capture, write and check the Word copy, in one command."""
     from labpilot.report import finish as do_finish
 
-    _run(_locked(run_id, lab_dir, lambda r: do_finish(r, cells, answers, backend, allow_cloud, allow_upload, gpu, allow_gpu)), json_out,
+    _run(_locked(run_id, lab_dir, lambda r: do_finish(r, cells, answers, backend, allow_cloud, allow_upload, gpu, allow_gpu, executed)), json_out,
          incomplete=lambda res: res["verdict"] != "COMPLETED")
 
 
