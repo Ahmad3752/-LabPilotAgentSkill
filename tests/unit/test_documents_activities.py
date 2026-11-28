@@ -123,9 +123,23 @@ def test_colab_fit_sql_server_and_interactive_calls() -> None:
     assert fit["colab_ok"] is False and "Microsoft SQL Server and SSMS" in fit["blockers"]
     lab2 = "Google Colab\nimport sqlite3\nconnection = sqlite3.connect('lab.db')\npd.read_sql_query(q, connection)"
     assert colab_fit(lab2) == {"colab_ok": True, "reason": "The manual is written for Google Colab.",
-                               "blockers": [], "needs_attention": []}
+                               "blockers": [], "needs_attention": [], "gpu": None, "gpu_evidence": []}
     fit = colab_fit("Google Colab\nfrom google.colab import files, drive\nuploaded = files.upload()\ndrive.mount('/content/d')")
     assert fit["colab_ok"] is True and len(fit["needs_attention"]) == 2
     assert all("upload" in n and "directly" in n for n in fit["needs_attention"])
-    fit = colab_fit("Google Colab\nRuntime > Change runtime type > T4 GPU\nmodel.to('cuda')")
-    assert fit["colab_ok"] and len(fit["needs_attention"]) == 1 and "--gpu T4" in fit["needs_attention"][0]
+
+
+@pytest.mark.parametrize(("text", "level"), [
+    ("Google Colab\nRuntime > Change runtime type > T4 GPU", "needed"),  # Colab setup step
+    ("model = model.to('cuda')", "needed"),
+    ("device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')", "needed"),
+    ("Scaling laws: larger models need more GPUs to train.", "maybe"),  # theory only: never starts on a GPU
+    ("from transformers import pipeline", "maybe"),  # ML library: permission to switch if needed
+    ("This lab does not need a GPU; the CPU runtime is enough.", None),
+    ("You can run this without a GPU.\nimport pandas as pd", None),
+    ("import pandas as pd\ndf.describe()", None),
+])
+def test_gpu_need_strong_weak_and_negated(text: str, level: str | None) -> None:
+    fit = colab_fit(text)
+    assert fit["gpu"] == level
+    assert bool(fit["gpu_evidence"]) == (level == "needed" or "GPU" in text and level is not None)

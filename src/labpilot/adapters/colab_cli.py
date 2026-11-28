@@ -196,11 +196,29 @@ class ColabCliBackend:
         m = ctx.run.manifest
         if not m.consent.cloud_compute:
             raise LabPilotError(ErrorCode.CONSENT_REQUIRED, "Colab compute needs explicit user consent.", exit_code=ExitCode.CONFIG)
-        session = f"{SESSION_PREFIX}{ctx.run.id}-{uuid.uuid4().hex[:4]}".lower()
         gpu = m.backend_state.get("gpu")  # set by `--gpu`; the colab CLI validates the variant and tier
-        res = self._colab("new", "-s", session, *(["--gpu", gpu] if gpu else []), timeout=900)
+        # the requested GPU, then a free T4, then CPU: a busy free tier still runs the (device-agnostic) lab
+        for want in (list(dict.fromkeys([gpu, "T4", None])) if gpu else [None]):
+            handle = self._new_session(ctx, want)
+            if handle is not None:
+                break
+        assert handle is not None  # the last option (CPU) either starts or raises
+        ran_on = handle.identity.get("gpu")
+        m.backend_state["runtime"] = (f"Colab GPU ({ran_on})" if ran_on else
+                                      "Colab CPU (no GPU was available)" if gpu else "Colab CPU")
+        ctx.run.save()
+        return handle
+
+    def _new_session(self, ctx: RunContext, want: str | None) -> RuntimeHandle | None:
+        """Start one session; None when the GPU asked for is refused or missing (then the next option is tried)."""
+        m = ctx.run.manifest
+        session = f"{SESSION_PREFIX}{ctx.run.id}-{uuid.uuid4().hex[:4]}".lower()
+        res = self._colab("new", "-s", session, *(["--gpu", want] if want else []), timeout=900)
         if not res.ok:
             code = self._classify_transport(res)
+            if want and code != ErrorCode.AUTH_REQUIRED:
+                ctx.run.event("progress", message=f"Colab has no {want} GPU free right now; trying the next option")
+                return None
             raise LabPilotError(code, f"colab new failed: {strip_ansi(res.stderr or res.stdout)[-400:]}",
                                 exit_code=ExitCode.RUNTIME)
         owned = m.backend_state.setdefault("owned_sessions", [])
@@ -217,6 +235,10 @@ class ColabCliBackend:
                 if line.startswith("LABPILOT_PROBE "):
                     handle.identity = json.loads(line[len("LABPILOT_PROBE "):])
         handle.identity["colab_session"] = session
+        if want and not handle.identity.get("gpu"):  # Colab gave a runtime without the GPU: free it, try the next
+            ctx.run.event("progress", message=f"the Colab session has no {want} GPU; trying the next option")
+            self._release(ctx.run, session)
+            return None
         return handle
 
     def stage_inputs(self, handle: RuntimeHandle, ctx: RunContext) -> StageResult:

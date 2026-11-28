@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import platform
+import re
 import shutil
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -22,11 +23,11 @@ from labpilot.orchestration import (
     capture,
     check_inputs,
     execute,
-    gpu_choice,
     load_plan,
     preflight,
     reset_for_changed_inputs,
     save_answers,
+    set_gpu,
     validate_answers,
 )
 from labpilot.security import redact, redact_obj
@@ -247,6 +248,8 @@ def build_review(run: Run, plan: Plan, checks: dict[str, Any], rendered: dict[st
                  status: RunState, answers: AnswersFile | None) -> str:
     m = run.manifest
     executed_on = m.attempts[-1]["backend"] if m.attempts else "n/a"
+    if m.backend_state.get("runtime"):
+        executed_on += f" — {m.backend_state['runtime']}"
     summaries = {s.task_id: s.explanation for s in (answers.task_summaries if answers else [])}
     lines = [f"# Review — {plan.lab_title}", ""]
     if m.synthetic:
@@ -401,7 +404,7 @@ def _recover(run: Run) -> list[dict[str, Any]]:
 
 
 def resume(run: Run, backend: str | None = None, allow_cloud: bool = False, allow_upload: bool = False,
-           max_steps: int = 8, gpu: str | None = None) -> dict[str, Any]:
+           max_steps: int = 8, gpu: str | None = None, allow_gpu: bool = False) -> dict[str, Any]:
     """Advance deterministic steps from the last consistent checkpoint until agent/user input is needed."""
     steps = _recover(run)
     m = run.manifest
@@ -411,7 +414,7 @@ def resume(run: Run, backend: str | None = None, allow_cloud: bool = False, allo
             break
         if na["action"] == "preflight" or (na["action"] == "execute" and (backend or not m.backend
                                                                            or any(d.status in ('found', 'mapped') and not d.staged_path for d in m.datasets))):
-            res = preflight(run, backend or m.backend or "auto", allow_cloud, allow_upload, gpu)
+            res = preflight(run, backend or m.backend or "auto", allow_cloud, allow_upload, gpu, allow_gpu)
             steps.append({"step": "preflight", "ok": res["ok"], "backend": res["backend"]})
             if not res["ok"]:
                 break
@@ -445,11 +448,21 @@ USER_ERRORS = {ErrorCode.AUTH_REQUIRED, ErrorCode.BACKEND_UNAVAILABLE, ErrorCode
                ErrorCode.CONSENT_REQUIRED, ErrorCode.RETRY_BUDGET_EXHAUSTED}
 
 
+# how a CPU run of a GPU lab fails: CUDA/driver errors, running out of memory, a dead kernel (timeouts count too)
+GPU_FAILURE = re.compile(r"cuda|nvidia|\bgpu\b|out of memory|MemoryError|kernel (?:died|restarted)", re.IGNORECASE)
+
+
+def _gpu_shaped(failed: list[dict[str, Any]]) -> bool:
+    return any(f.get("error_code") == str(ErrorCode.TIMEOUT)
+               or GPU_FAILURE.search(f"{f.get('error_message') or ''} {f.get('traceback_tail') or ''}") for f in failed)
+
+
 CLOSING_MESSAGE = "All done, your lab is complete! Hope you liked it. With love from VellaGang <3"
 
 
 def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None = None, backend: str | None = None,
-           allow_cloud: bool = False, allow_upload: bool = False, gpu: str | None = None) -> dict[str, Any]:
+           allow_cloud: bool = False, allow_upload: bool = False, gpu: str | None = None,
+           allow_gpu: bool = False) -> dict[str, Any]:
     """build-notebook -> preflight/execute -> capture -> answers -> export (runs evaluate); skips current steps.
 
     Stops at the first step that needs the agent (failed cells, answers) or the user (sign-in, consent).
@@ -484,16 +497,16 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
         ran = ran or any(r["result"] for r in recovered)
 
         step = "execute"
+        set_gpu(run, gpu, allow_gpu)  # a changed runtime marks every cell stale, so they all run again
         rp = run.exec_dir / "current_records.json"
         transient = {r["cell_id"] for r in (read_json(rp) if rp.exists() else []) if r.get("error_code") in TRANSIENT}
         failed = [c for c, s in m.cell_status.items() if s == ItemStatus.FAILED]
         todo = [c for c, s in m.cell_status.items() if s in (ItemStatus.PENDING, ItemStatus.STALE)]
-        new_gpu = bool(gpu) and gpu_choice(gpu or "") != m.backend_state.get("gpu")  # a GPU change re-runs failures
         if m.backend_state.get("pending_host_actions"):
             stop = {"actor": "agent", "action": "record-execution",
                     "detail": f"Run the cells in host_actions.json via colab-mcp, then `labpilot record-execution {rid} "
                               "--file result.json`, then `labpilot finish` again."}
-        elif [c for c in failed if c not in transient] and not todo and not new_gpu:
+        elif [c for c in failed if c not in transient] and not todo:
             say(3, "the failing cells are unchanged, so nothing is run (skipped)")
             steps.append({"step": step, "status": "failed", "failed_cells": failed})
             stop = {"actor": "agent", "action": "repair",
@@ -502,7 +515,7 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
         elif todo or failed:
             say(3, "running the cells on " + ("the local kernel" if (backend or m.backend) == "local" else "Colab"))
             step = "preflight"
-            pf = preflight(run, backend or m.backend or "auto", allow_cloud, allow_upload, gpu)
+            pf = preflight(run, backend or m.backend or "auto", allow_cloud, allow_upload, gpu, allow_gpu)
             bad = [c for c in pf["preflight"]["checks"] if not c["ok"] and c.get("required", True)]
             steps.append({"step": step, "status": "done" if pf["ok"] else "failed", "backend": pf["backend"],
                           "failed_checks": [c["name"] for c in bad], "input_changes": pf["input_changes"]})
@@ -517,12 +530,27 @@ def finish(run: Run, cells_file: Path | None = None, answers_file: Path | None =
                 step = "execute"
                 ex = execute(run)
                 ran = True
+                if (ex["status"] == "FAILED_CELLS" and m.consent.gpu and m.backend == "colab-cli"
+                        and not m.backend_state.get("gpu") and _gpu_shaped(ex["failed"])):
+                    # failed on CPU the way a GPU lab does and the user allowed a free T4: switch once (no loop,
+                    # the GPU is now set) and run every cell again on the new runtime
+                    say(3, "the lab needs a GPU: switching to a free Colab T4 and running every cell again")
+                    steps.append({"step": "switch-to-gpu", "status": "done",
+                                  "cpu_failures": [f["cell_id"] for f in ex["failed"]]})
+                    set_gpu(run, "T4")
+                    ex = execute(run)
                 steps.append({"step": step, "status": "failed" if ex["status"] == "FAILED_CELLS" else "done",
                               "result": ex["status"], "attempt_id": ex.get("attempt_id"),
                               "passed": len(ex.get("passed", [])), "failed": ex.get("failed", []),
                               "blocked": ex.get("blocked", []), "runtime_release": ex.get("runtime_release")})
                 if ex["status"] == "WAITING_FOR_HOST":
                     stop = {"actor": "agent", "action": "record-execution", "detail": ex["next_action"]}
+                elif (ex["status"] == "FAILED_CELLS" and m.backend_state.get("gpu")
+                      and "no GPU" in m.backend_state.get("runtime", "") and _gpu_shaped(ex["failed"])):
+                    stop = {"actor": "user", "action": "gpu-unavailable",
+                            "detail": "This lab needs a GPU, and Google Colab had no free GPU for your account right "
+                                      "now (free GPUs run out; the limit resets within about a day). Run the same "
+                                      f"`labpilot finish {rid}` command again later."}
                 elif ex["status"] == "FAILED_CELLS":
                     stop = {"actor": "agent", "action": "repair",
                             "detail": "Fix the failing cells using `failed[].traceback_tail`, then "

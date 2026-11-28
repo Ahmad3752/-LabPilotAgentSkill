@@ -16,6 +16,7 @@
 | CONSENT_REQUIRED | Cloud compute or file upload needs the user's permission. | Pass `--allow-cloud` / `--allow-upload` (the user's up-front yes). Ask only if they never said yes. |
 | MCP_UNAVAILABLE | The colab-mcp tools are not listed in the host agent. | Reconnect or restart the agent per colab-mcp's docs, or use the default colab-cli backend. |
 | BROWSER_UNAVAILABLE | Chromium for Playwright is missing. | Run `python -m playwright install chromium`. |
+| gpu-unavailable | The lab needs a GPU and Colab had none free for this account (free GPUs run out; the limit resets within about a day). | Tell the user to run the same `labpilot finish` command later. Do not change the cells. |
 | EVIDENCE_INVALID / EVIDENCE_STALE | A screenshot is blank, a cell has no output, or the code changed after capture. | Fix the cell's output display, then re-execute and capture again. |
 | ANCHOR_AMBIGUOUS | An anchor's text changed or doesn't match. | Re-inspect the document and copy the anchors again. |
 | RUN_LOCKED | Another LabPilot process is using this run. | Wait for it to finish, or run `labpilot cancel <id>`. |

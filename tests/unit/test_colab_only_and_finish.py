@@ -192,6 +192,35 @@ def test_finish_stops_on_error_output(tmp_path: Path, colab_only: None, monkeypa
     assert "preflight" not in {s["step"] for s in finish(run, gpu="T4")["steps"]}
 
 
+CUDA_ERROR = "RuntimeError: Found no NVIDIA driver on your system"
+
+
+def test_cpu_failure_like_a_gpu_lab_switches_to_t4_once(tmp_path: Path, colab_only: None,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    run, folder = _lab_run(tmp_path)
+    fake = FakeColab(errors={"t1b-revenue": CUDA_ERROR})  # this fake's probe reports no GPU, so T4 falls back to CPU
+    _fake(monkeypatch, fake)
+    res = finish(run, cells_file=folder / "cells.json", allow_cloud=True, allow_upload=True, allow_gpu=True)
+    assert "switch-to-gpu" in {s["step"] for s in res["steps"]}
+    news = [c for c in fake.calls if c[1] == "new"]
+    assert "--gpu" not in news[0] and news[1][-2:] == ["--gpu", "T4"]  # CPU first, then T4, then CPU fallback
+    assert run.manifest.backend_state["runtime"] == "Colab CPU (no GPU was available)"
+    assert res["next_action"]["action"] == "gpu-unavailable" and res["next_action"]["actor"] == "user"
+    # calling again does not loop through GPU attempts: the failing cells are unchanged
+    calls = len(fake.calls)
+    assert "switch-to-gpu" not in {s["step"] for s in finish(run, allow_gpu=True)["steps"]}
+    assert not [c for c in fake.calls[calls:] if c[1] == "new"]
+
+
+def test_no_gpu_switch_without_permission(tmp_path: Path, colab_only: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    run, folder = _lab_run(tmp_path)
+    fake = FakeColab(errors={"t1b-revenue": CUDA_ERROR})
+    _fake(monkeypatch, fake)
+    res = finish(run, cells_file=folder / "cells.json", allow_cloud=True, allow_upload=True)
+    assert "switch-to-gpu" not in {s["step"] for s in res["steps"]}
+    assert not any("--gpu" in c for c in fake.calls) and res["next_action"]["action"] == "repair"
+
+
 def test_stop_keeps_ownership_until_release_is_confirmed(tmp_path: Path, colab_only: None,
                                                          monkeypatch: pytest.MonkeyPatch) -> None:
     from labpilot.adapters.base import RunContext, RuntimeHandle

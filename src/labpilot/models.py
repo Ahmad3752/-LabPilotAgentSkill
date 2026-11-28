@@ -327,6 +327,7 @@ class Blocker(BaseModel):
 class Consent(BaseModel):
     cloud_compute: bool = False
     upload_datasets: bool = False
+    gpu: bool = False  # may use a free Colab T4 when the lab needs one (`--allow-gpu`)
     scope: Literal["run", "none"] = "none"
     granted_at: str | None = None
 

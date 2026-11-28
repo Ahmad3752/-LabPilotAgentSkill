@@ -43,6 +43,12 @@ try:
     _info["java"] = (_jv.stderr or _jv.stdout).splitlines()[0] if (_jv.stderr or _jv.stdout) else None
 except Exception:
     pass
+try:  # the GPU the runtime really has (None on CPU), so a GPU request is checked, not trusted
+    import subprocess as _sp
+    _g = _sp.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True, text=True, timeout=20)
+    _info["gpu"] = _g.stdout.strip().splitlines()[0] if _g.returncode == 0 and _g.stdout.strip() else None
+except Exception:
+    _info["gpu"] = None
 try:
     import google.colab  # noqa: F401
     _info["google_colab"] = True

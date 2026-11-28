@@ -46,7 +46,7 @@ Last updated: 2026-11-28.
 
 ## Session log (newest first; keep the last five)
 
-- **2026-11-28:** GPU labs: `labpilot finish --gpu T4` (also `preflight`/`resume`) runs the lab on a Colab GPU runtime; `colab-check` flags GPU labs and the skill asks once. Unit-tested only; next: one real T4 run (e.g. Lab 10, In-Context Learning).
+- **2026-11-28:** GPU labs, agreed with the user: the one question asks for a free T4 "if needed" on ML labs (`--allow-gpu`); with no GPU free, fall back to CPU (cells must be device-agnostic). Detection is strong/weak/negated, the runtime is checked with `nvidia-smi`, a CPU run that fails like a GPU lab switches to T4 once. Unit-tested only; next: one real T4 run (e.g. Lab 10, In-Context Learning).
 
 - **2026-11-28:** `finish` returns a `closing_message` ("All done, your lab is complete! Hope you liked it. With love from VellaGang <3") only when the lab is COMPLETED; the skill ends its final message with it.
 

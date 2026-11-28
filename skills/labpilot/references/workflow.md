@@ -56,6 +56,7 @@ validates each one. Everything between them is one command, `labpilot finish` (b
 ```
 
 Rules for cell code:
+- GPU code must also run on CPU: `device = "cuda" if torch.cuda.is_available() else "cpu"` and `.to(device)`, never a bare `.cuda()` or `"cuda"`. LabPilot may fall back to CPU when Colab has no free GPU.
 - Files are staged in the kernel's working directory. Use relative names (`'sales.csv'`), never `/content/...` or absolute paths. Write outputs (for example Parquet) to relative paths too.
 - Do not use `files.upload()`, `input()`, Drive mounts, or credential or environment dumps. These are denied.
 - Shell (`!pip ...`, `subprocess`) and network use trigger warnings (allowed; recorded in the report).

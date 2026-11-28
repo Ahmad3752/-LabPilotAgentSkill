@@ -440,14 +440,28 @@ def gpu_choice(gpu: str) -> str | None:
     return None if gpu.lower() in ("none", "cpu") else gpu.upper()
 
 
+def set_gpu(run: Run, gpu: str | None, allow_gpu: bool = False) -> bool:
+    """Record the `--gpu`/`--allow-gpu` choice. A runtime change re-runs every cell, so one notebook = one runtime."""
+    m = run.manifest
+    m.consent.gpu = m.consent.gpu or allow_gpu
+    if not gpu or gpu_choice(gpu) == m.backend_state.get("gpu"):
+        return False
+    m.backend_state["gpu"] = gpu_choice(gpu)
+    m.consent.gpu = m.consent.gpu or m.backend_state["gpu"] is not None  # an explicit --gpu is the user's yes
+    for cid, status in m.cell_status.items():
+        if status != ItemStatus.PENDING:
+            m.cell_status[cid] = ItemStatus.STALE
+    run.save()
+    return True
+
+
 def preflight(run: Run, backend: str = "auto", allow_cloud: bool = False, allow_upload: bool = False,
-              gpu: str | None = None) -> dict[str, Any]:
+              gpu: str | None = None, allow_gpu: bool = False) -> dict[str, Any]:
     plan = load_plan(run)
     m = run.manifest
     profile = load_profile(plan.profile)
     m.profile = plan.profile
-    if gpu:  # remembered for the run and used by the next Colab session
-        m.backend_state["gpu"] = gpu_choice(gpu)
+    set_gpu(run, gpu, allow_gpu)
     if allow_cloud or allow_upload:
         m.consent.cloud_compute = m.consent.cloud_compute or allow_cloud
         m.consent.upload_datasets = m.consent.upload_datasets or allow_upload

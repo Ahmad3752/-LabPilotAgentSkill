@@ -6,6 +6,7 @@ tests/integration/test_colab_cloud_smoke.py.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -91,9 +92,57 @@ def test_start_requires_consent_and_records_owned_session(tmp_path: Path, monkey
     assert fake.calls[0][:3] == ["colab", "new", "-s"] and "--gpu" not in fake.calls[0]  # CPU by default
     be.stop(handle, ctx)
     assert ["colab", "stop", "-s", session] in fake.calls
-    run.manifest.backend_state["gpu"] = "T4"  # what `--gpu t4` stores
-    be.start(ctx)
-    assert [c[-2:] for c in fake.calls if c[1] == "new"][-1] == ["--gpu", "T4"]
+    assert run.manifest.backend_state["runtime"] == "Colab CPU"
+
+
+class GpuFakeColab(FakeColab):
+    """FAKE `colab`: `new --gpu X` is refused for X in `refuse`; the probe reports a GPU only when one was granted."""
+
+    def __init__(self, refuse: tuple[str, ...] = (), empty: tuple[str, ...] = ()) -> None:
+        super().__init__()
+        self.refuse, self.empty = refuse, empty
+
+    def __call__(self, args: list[str], **kw: Any) -> CmdResult:
+        if args[1] == "new":
+            want = args[args.index("--gpu") + 1] if "--gpu" in args else None
+            if want in self.refuse:
+                self.calls.append(args)
+                return CmdResult(1, "", "No backend with GPU available")
+            gpu = f"Tesla {want}" if want and want not in self.empty else None
+            self.outputs["probe"] = [{"output_type": "stream", "name": "stdout",
+                                      "text": "LABPILOT_PROBE " + json.dumps({"google_colab": True, "gpu": gpu}) + "\n"}]
+        return super().__call__(args, **kw)
+
+
+@pytest.mark.parametrize(("refuse", "empty", "tried", "runtime"), [
+    ((), (), ["L4"], "Colab GPU (Tesla L4)"),
+    (("L4",), (), ["L4", "T4"], "Colab GPU (Tesla T4)"),  # Pro GPU refused: a free T4
+    (("L4", "T4"), (), ["L4", "T4", None], "Colab CPU (no GPU was available)"),  # none free: CPU
+    ((), ("L4", "T4"), ["L4", "T4", None], "Colab CPU (no GPU was available)"),  # granted but no GPU inside
+])
+def test_gpu_fallback_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refuse: tuple[str, ...],
+                            empty: tuple[str, ...], tried: list[str | None], runtime: str) -> None:
+    fake = GpuFakeColab(refuse, empty)
+    be = _backend(monkeypatch, fake)
+    run = _run(tmp_path)
+    run.manifest.backend_state["gpu"] = "L4"
+    handle = be.start(RunContext(run=run, profile=load_profile("python"), attempt_id="a001", timeout_s=60, datasets=[]))
+    news = [c for c in fake.calls if c[1] == "new"]
+    assert [c[c.index("--gpu") + 1] if "--gpu" in c else None for c in news] == tried
+    assert run.manifest.backend_state["runtime"] == runtime
+    # sessions without the GPU were stopped; only the one in use is still owned
+    assert run.manifest.backend_state["owned_sessions"] == [handle.state["session"]]
+    assert len([c for c in fake.calls if c[1] == "stop"]) == len(empty)
+
+
+def test_gpu_request_does_not_hide_a_sign_in_problem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeColab(fail={"new": CmdResult(1, "", "google.auth: invalid_grant, Reauthentication is needed")})
+    be = _backend(monkeypatch, fake)
+    run = _run(tmp_path)
+    run.manifest.backend_state["gpu"] = "T4"
+    with pytest.raises(LabPilotError) as exc:
+        be.start(RunContext(run=run, profile=load_profile("python"), attempt_id="a001", timeout_s=60, datasets=[]))
+    assert exc.value.code == ErrorCode.AUTH_REQUIRED and len(fake.calls) == 1
 
 
 def test_exec_success_failure_and_stop_on_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -673,9 +673,27 @@ COLAB_ATTENTION = [
     (re.compile(r"drive\.mount\s*\("),
      "drive.mount() needs an interactive Google sign-in the CLI cannot click: upload the files to the runtime "
      "directly instead of reading them from Drive."),
-    (re.compile(r"\b(?:GPU|CUDA)\b|\.cuda\(|['\"]cuda['\"]|change runtime type", re.IGNORECASE),
-     "The lab uses a GPU: ask the user once (it uses their Colab GPU quota), then add --gpu T4 to `labpilot finish`."),
 ]
+# GPU need, judged per line. Strong: code or setup steps that put work on a GPU. Weak: the word alone (often theory).
+GPU_STRONG = re.compile(r"\.cuda\(|['\"]cuda(?::\d)?['\"]|torch\.cuda|nvidia-smi|"
+                        r"(?:change runtime type|hardware accelerator|runtime type).*\b(?:GPU|T4)\b", re.IGNORECASE)
+GPU_WEAK = re.compile(r"\b(?:GPU|CUDA)s?\b", re.IGNORECASE)
+GPU_NOT_NEEDED = re.compile(r"\b(?:no|not|without|don't|doesn't|do not|does not|never)\b[^.\n]{0,40}\b(?:GPU|CUDA)\b|"
+                            r"\bCPU\b[^.\n]{0,25}\b(?:is )?(?:enough|sufficient|fine)\b", re.IGNORECASE)
+ML_LIBRARIES = re.compile(r"\b(?:import torch|from torch|transformers|tensorflow|keras|from_pretrained|"
+                          r"AutoModel\w*|diffusers|sentence_transformers)\b")
+
+
+def gpu_need(text: str) -> dict[str, Any]:
+    """`needed`: the manual puts work on a GPU. `maybe`: GPUs are only mentioned, or it uses ML libraries.
+
+    `needed` starts the lab on a T4; `maybe` only asks for permission to switch if a CPU run fails like a GPU lab.
+    """
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip() and not GPU_NOT_NEEDED.search(ln)]
+    strong = [ln for ln in lines if GPU_STRONG.search(ln)]
+    weak = [ln for ln in lines if GPU_WEAK.search(ln)]
+    level = "needed" if strong else ("maybe" if weak or ML_LIBRARIES.search(text) else None)
+    return {"gpu": level, "gpu_evidence": [ln[:160] for ln in (strong or weak)[:3]]}
 
 
 def colab_fit(text: str) -> dict[str, Any]:
@@ -697,7 +715,8 @@ def colab_fit(text: str) -> dict[str, Any]:
         ok, reason = True, "A Python lab: it runs in Google Colab even though the manual does not name it."
     else:
         ok, reason = False, "It is not a Python notebook lab, so it cannot be done in Google Colab."
-    return {"colab_ok": ok, "reason": reason, "blockers": blockers, "needs_attention": needs_attention}
+    return {"colab_ok": ok, "reason": reason, "blockers": blockers, "needs_attention": needs_attention,
+            **gpu_need(text)}
 
 
 def colab_features(insp: Inspection) -> list[dict[str, Any]]:
